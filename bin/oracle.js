@@ -62,6 +62,7 @@ program.addHelpText(
   () => `
 ${bold('Tips')}
 ${dim(' •')} This CLI is tuned for tough questions. Attach source files for best results, but keep total input under ~196k tokens.
+${dim(' •')} The model has no built-in knowledge of your project—start each run with a sentence or two about the architecture, key components, and why you’re asking the question if that context matters.
 ${dim(' •')} Run ${bold('--files-report')} to see per-file token impact before spending money.
 ${dim(' •')} Non-preview runs spawn detached sessions so requests keep running even if your terminal closes.
 
