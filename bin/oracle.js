@@ -13,7 +13,7 @@ const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const program = new Command();
 program
   .name('oracle')
-  .description('Query GPT-5 Pro or GPT-5.1 via the OpenAI Responses API with optional file context and web search.')
+  .description('One-shot GPT-5 Pro / GPT-5.1 tool for hard questions that benefit from large file context and server-side search.')
   .option('-p, --prompt <text>', 'User prompt to send to the model.')
   .option('-f, --file <paths...>', 'Paths to files or directories to append to the prompt; repeat or supply a space-separated list.', collectPaths, [])
   .option('-m, --model <model>', 'Model to target (gpt-5-pro | gpt-5.1).', validateModel, 'gpt-5-pro')
@@ -33,6 +33,29 @@ program
   .option('--status-limit <count>', 'Maximum sessions to show (max 1000).', parseIntOption, 100)
   .option('--render-markdown', 'Emit the assembled markdown bundle for prompt + files and exit.', false)
   .showHelpAfterError('(use --help for usage)');
+
+program.addHelpText(
+  'after',
+  `
+Tips:
+  • This CLI is tuned for tough questions where GPT-5 needs rich context. Attach source files for best results but keep the total size below the ~196k-token window.
+  • Use --files-report to see how many tokens each attachment consumes before paying for a run.
+  • Non-preview runs spawn a detached session that keeps going even if your terminal closes.
+
+Examples:
+  $ oracle --prompt "Summarize risks" --file docs/risk.md --files-report --preview
+    (inspect the token budget and attached files without hitting the API)
+
+  $ oracle --prompt "Explain bug" --file src/ --files-report
+    (launches a background session; note the Session ID in the output)
+
+  $ oracle --status
+    (lists recent sessions; add --status-hours 72 or --status-all to widen the range)
+
+  $ oracle --session <sessionId>
+    (attach to an existing request, follow the live stream if still running, or replay the saved transcript)
+`,
+);
 
 function collectPaths(value, previous) {
   if (!value) {
@@ -59,6 +82,11 @@ function validateModel(value) {
 
 async function main() {
   const options = program.parse(process.argv).opts();
+
+  if (process.argv.length <= 2) {
+    program.outputHelp();
+    return;
+  }
 
   if (options.session) {
     await attachSession(options.session);
