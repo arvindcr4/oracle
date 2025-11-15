@@ -196,6 +196,7 @@ export async function runOracle(options: RunOracleOptions, deps: RunOracleDeps =
   let answerHeaderPrinted = false;
   const ensureAnswerHeader = () => {
     if (!options.silent && !answerHeaderPrinted) {
+      log('');
       log(chalk.bold('Answer:'));
       answerHeaderPrinted = true;
     }
