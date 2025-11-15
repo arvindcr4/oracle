@@ -289,22 +289,29 @@ export async function submitPrompt(
 ) {
   const { runtime, input } = deps;
   const encodedPrompt = JSON.stringify(prompt);
-  await runtime.evaluate({
+  const focusResult = await runtime.evaluate({
     expression: `(() => {
       const SELECTORS = ${JSON.stringify(INPUT_SELECTORS)};
+      const dispatchPointer = (target) => {
+        if (!(target instanceof HTMLElement)) {
+          return;
+        }
+        for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+          target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+        }
+      };
       const focusNode = (node) => {
-        if (!node) return false;
-        if (node.contentEditable === 'true' && typeof node.focus === 'function') {
-          node.focus();
-          return true;
+        if (!node) {
+          return false;
         }
-        if (node.tagName === 'TEXTAREA' || node.tagName === 'INPUT') {
+        dispatchPointer(node);
+        if (typeof node.focus === 'function') {
           node.focus();
-          return true;
         }
-        const range = document.createRange();
-        const selection = window.getSelection();
-        if (selection && range) {
+        const doc = node.ownerDocument;
+        const selection = doc?.getSelection?.();
+        if (selection) {
+          const range = doc.createRange();
           range.selectNodeContents(node);
           range.collapse(false);
           selection.removeAllRanges();
@@ -325,8 +332,11 @@ export async function submitPrompt(
     returnByValue: true,
     awaitPromise: true,
   });
+  if (!focusResult.result?.value?.focused) {
+    throw new Error('Failed to focus prompt textarea');
+  }
 
-    await input.insertText({ text: prompt });
+  await input.insertText({ text: prompt });
 
   const verification = await runtime.evaluate({
     expression: `(() => {
