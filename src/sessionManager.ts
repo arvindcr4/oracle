@@ -4,6 +4,33 @@ import fs from 'node:fs/promises';
 import { createWriteStream } from 'node:fs';
 import type { WriteStream } from 'node:fs';
 
+export type SessionMode = 'api' | 'browser';
+
+export interface BrowserSessionConfig {
+  chromeProfile?: string | null;
+  chromePath?: string | null;
+  url?: string;
+  timeoutMs?: number;
+  inputTimeoutMs?: number;
+  cookieSync?: boolean;
+  headless?: boolean;
+  keepBrowser?: boolean;
+  hideWindow?: boolean;
+  desiredModel?: string | null;
+  debug?: boolean;
+}
+
+export interface BrowserRuntimeMetadata {
+  chromePid?: number;
+  chromePort?: number;
+  userDataDir?: string;
+}
+
+export interface BrowserMetadata {
+  config?: BrowserSessionConfig;
+  runtime?: BrowserRuntimeMetadata;
+}
+
 export interface StoredRunOptions {
   prompt?: string;
   file?: string[];
@@ -13,6 +40,9 @@ export interface StoredRunOptions {
   maxOutput?: number;
   silent?: boolean;
   filesReport?: boolean;
+  slug?: string;
+  mode?: SessionMode;
+  browserConfig?: BrowserSessionConfig;
 }
 
 export interface SessionMetadata {
@@ -25,6 +55,7 @@ export interface SessionMetadata {
   options: StoredRunOptions;
   startedAt?: string;
   completedAt?: string;
+  mode?: SessionMode;
   usage?: {
     inputTokens: number;
     outputTokens: number;
@@ -33,6 +64,7 @@ export interface SessionMetadata {
   };
   errorMessage?: string;
   elapsedMs?: number;
+  browser?: BrowserMetadata;
 }
 
 interface SessionLogWriter {
@@ -50,6 +82,9 @@ interface InitializeSessionOptions extends StoredRunOptions {
 const ORACLE_HOME = process.env.ORACLE_HOME_DIR ?? path.join(os.homedir(), '.oracle');
 const SESSIONS_DIR = path.join(ORACLE_HOME, 'sessions');
 const MAX_STATUS_LIMIT = 1000;
+const DEFAULT_SLUG = 'session';
+const MAX_SLUG_WORDS = 5;
+const MIN_CUSTOM_SLUG_WORDS = 3;
 
 async function ensureDir(dirPath: string): Promise<void> {
   await fs.mkdir(dirPath, { recursive: true });
@@ -59,31 +94,31 @@ export async function ensureSessionStorage(): Promise<void> {
   await ensureDir(SESSIONS_DIR);
 }
 
-function slugify(text: string, maxLength = 32): string {
-  const words = text.toLowerCase().match(/[a-z0-9]+/g) ?? [];
-  if (words.length === 0) {
-    return 'session';
-  }
-  const parts = [];
-  let length = 0;
-  for (const word of words) {
-    const projected = length === 0 ? word.length : length + 1 + word.length;
-    if (projected > maxLength) {
-      if (parts.length === 0) {
-        parts.push(word.slice(0, maxLength));
-      }
-      break;
-    }
-    parts.push(word);
-    length = projected;
-  }
-  return parts.join('-') || 'session';
+function slugify(text: string | undefined, maxWords = MAX_SLUG_WORDS): string {
+  const normalized = text?.toLowerCase() ?? '';
+  const words = normalized.match(/[a-z0-9]+/g) ?? [];
+  const trimmed = words.slice(0, maxWords);
+  return trimmed.length > 0 ? trimmed.join('-') : DEFAULT_SLUG;
 }
 
-export function createSessionId(prompt: string): string {
-  const timestamp = new Date().toISOString().replace(/\..*/, '').replace('T', '-').replace(/:/g, '-');
-  const slug = slugify(prompt);
-  return `${timestamp}-${slug}`;
+function countSlugWords(slug: string): number {
+  return slug.split('-').filter(Boolean).length;
+}
+
+function normalizeCustomSlug(candidate: string): string {
+  const slug = slugify(candidate, MAX_SLUG_WORDS);
+  const wordCount = countSlugWords(slug);
+  if (wordCount < MIN_CUSTOM_SLUG_WORDS || wordCount > MAX_SLUG_WORDS) {
+    throw new Error(`Custom slug must include between ${MIN_CUSTOM_SLUG_WORDS} and ${MAX_SLUG_WORDS} words.`);
+  }
+  return slug;
+}
+
+export function createSessionId(prompt: string, customSlug?: string): string {
+  if (customSlug) {
+    return normalizeCustomSlug(customSlug);
+  }
+  return slugify(prompt);
 }
 
 function sessionDir(id: string): string {
@@ -111,14 +146,24 @@ async function fileExists(targetPath: string): Promise<boolean> {
   }
 }
 
+async function ensureUniqueSessionId(baseSlug: string): Promise<string> {
+  let candidate = baseSlug;
+  let suffix = 2;
+  while (await fileExists(sessionDir(candidate))) {
+    candidate = `${baseSlug}-${suffix}`;
+    suffix += 1;
+  }
+  return candidate;
+}
+
 export async function initializeSession(options: InitializeSessionOptions, cwd: string): Promise<SessionMetadata> {
   await ensureSessionStorage();
-  let sessionId = createSessionId(options.prompt || 'session');
-  while (await fileExists(sessionDir(sessionId))) {
-    sessionId = `${sessionId}-${Math.floor(Math.random() * 1000)}`;
-  }
+  const baseSlug = createSessionId(options.prompt || DEFAULT_SLUG, options.slug);
+  const sessionId = await ensureUniqueSessionId(baseSlug);
   const dir = sessionDir(sessionId);
   await ensureDir(dir);
+  const mode = options.mode ?? 'api';
+  const browserConfig = options.browserConfig;
   const metadata: SessionMetadata = {
     id: sessionId,
     createdAt: new Date().toISOString(),
@@ -126,6 +171,8 @@ export async function initializeSession(options: InitializeSessionOptions, cwd: 
     promptPreview: (options.prompt || '').slice(0, 160),
     model: options.model,
     cwd,
+    mode,
+    browser: browserConfig ? { config: browserConfig } : undefined,
     options: {
       prompt: options.prompt,
       file: options.file ?? [],
@@ -135,6 +182,9 @@ export async function initializeSession(options: InitializeSessionOptions, cwd: 
       maxOutput: options.maxOutput,
       silent: options.silent,
       filesReport: options.filesReport,
+      slug: sessionId,
+      mode,
+      browserConfig,
     },
   };
   await fs.writeFile(metaPath(sessionId), JSON.stringify(metadata, null, 2), 'utf8');

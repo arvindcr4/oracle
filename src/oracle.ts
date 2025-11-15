@@ -84,6 +84,7 @@ export interface RunOracleOptions {
   prompt: string;
   model: ModelName;
   file?: string[];
+  slug?: string;
   filesReport?: boolean;
   maxInput?: number;
   maxOutput?: number;
@@ -236,7 +237,7 @@ export const DEFAULT_SYSTEM_PROMPT = [
 const isTty = process.stdout.isTTY;
 const dim = (text: string): string => (isTty ? kleur.dim(text) : text);
 
-const TOKENIZER_OPTIONS = { allowedSpecial: 'all' } as const;
+export const TOKENIZER_OPTIONS = { allowedSpecial: 'all' } as const;
 
 export function collectPaths(value: string | string[] | undefined, previous: string[] = []): string[] {
   if (!value) {

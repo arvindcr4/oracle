@@ -17,14 +17,32 @@ import {
   SESSIONS_DIR,
   deleteSessionsOlderThan,
 } from '../src/sessionManager.js';
-import type { SessionMetadata } from '../src/sessionManager.js';
-import { runOracle, MODEL_CONFIGS, parseIntOption, renderPromptMarkdown, readFiles } from '../src/oracle.js';
+import type {
+  SessionMetadata,
+  SessionMode,
+  BrowserSessionConfig,
+  BrowserRuntimeMetadata,
+} from '../src/sessionManager.js';
+import {
+  runOracle,
+  MODEL_CONFIGS,
+  parseIntOption,
+  renderPromptMarkdown,
+  readFiles,
+  buildPrompt,
+  createFileSections,
+  DEFAULT_SYSTEM_PROMPT,
+  formatElapsed,
+  TOKENIZER_OPTIONS,
+} from '../src/oracle.js';
 import type { ModelName, PreviewMode, RunOracleOptions } from '../src/oracle.js';
+import { runBrowserMode, CHATGPT_URL, DEFAULT_MODEL_TARGET, parseDuration } from '../src/browserMode.js';
 
 interface CliOptions extends OptionValues {
   prompt?: string;
   file?: string[];
   model: ModelName;
+  slug?: string;
   filesReport?: boolean;
   maxInput?: number;
   maxOutput?: number;
@@ -38,6 +56,17 @@ interface CliOptions extends OptionValues {
   execSession?: string;
   renderMarkdown?: boolean;
   sessionId?: string;
+  browser?: boolean;
+  browserChromeProfile?: string;
+  browserChromePath?: string;
+  browserUrl?: string;
+  browserTimeout?: string;
+  browserInputTimeout?: string;
+  browserNoCookieSync?: boolean;
+  browserHeadless?: boolean;
+  browserHideWindow?: boolean;
+  browserKeepBrowser?: boolean;
+  browserDebug?: boolean;
 }
 
 interface ShowStatusOptions {
@@ -57,115 +86,50 @@ const VERSION = '1.0.0';
 const rawCliArgs = process.argv.slice(2);
 const isTty = process.stdout.isTTY;
 
-type HelpStyler = (text: string) => string;
+type Stylizer = (text: string) => string;
+const colorIfTty = (styler: Stylizer): Stylizer => (text) => (isTty ? styler(text) : text);
 
-interface HelpTheme {
-  name: HelpThemeName;
-  banner: HelpStyler;
-  subtitle: HelpStyler;
-  heading: HelpStyler;
-  bullet: HelpStyler;
-  body: HelpStyler;
-  muted: HelpStyler;
-  command: HelpStyler;
-  accent: HelpStyler;
-}
-
-const HELP_THEME_NAMES = ['aurora', 'ember', 'slate'] as const;
-type HelpThemeName = (typeof HELP_THEME_NAMES)[number];
-
-const passthrough: HelpStyler = (text) => text;
-const wrapForTty = (styler: HelpStyler): HelpStyler => (text) => (isTty ? styler(text) : text);
-
-const createTheme = (name: HelpThemeName, config: Omit<HelpTheme, 'name'>): HelpTheme => ({
-  name,
-  banner: wrapForTty(config.banner),
-  subtitle: wrapForTty(config.subtitle),
-  heading: wrapForTty(config.heading),
-  bullet: wrapForTty(config.bullet),
-  body: wrapForTty(config.body),
-  muted: wrapForTty(config.muted),
-  command: wrapForTty(config.command),
-  accent: wrapForTty(config.accent),
-});
-
-const HELP_THEMES: Record<HelpThemeName, HelpTheme> = {
-  aurora: createTheme('aurora', {
-    banner: (text) => kleur.bold().cyan(text),
-    subtitle: (text) => kleur.dim(text),
-    heading: (text) => kleur.bold().magenta(text),
-    bullet: (text) => kleur.cyan(text),
-    body: passthrough,
-    muted: (text) => kleur.gray(text),
-    command: (text) => kleur.bold().white(text),
-    accent: (text) => kleur.magenta(text),
-  }),
-  ember: createTheme('ember', {
-    banner: (text) => kleur.bold().yellow(text),
-    subtitle: (text) => kleur.dim(text),
-    heading: (text) => kleur.bold().red(text),
-    bullet: (text) => kleur.yellow(text),
-    body: passthrough,
-    muted: (text) => kleur.dim(text),
-    command: (text) => kleur.bold().yellow(text),
-    accent: (text) => kleur.red(text),
-  }),
-  slate: createTheme('slate', {
-    banner: (text) => kleur.bold().blue(text),
-    subtitle: (text) => kleur.dim(text),
-    heading: (text) => kleur.bold().white(text),
-    bullet: (text) => kleur.blue(text),
-    body: passthrough,
-    muted: (text) => kleur.gray(text),
-    command: (text) => kleur.bold().blue(text),
-    accent: (text) => kleur.cyan(text),
-  }),
+const helpColors = {
+  banner: colorIfTty((text) => kleur.bold().blue(text)),
+  subtitle: colorIfTty((text) => kleur.dim(text)),
+  section: colorIfTty((text) => kleur.bold().white(text)),
+  bullet: colorIfTty((text) => kleur.blue(text)),
+  command: colorIfTty((text) => kleur.bold().blue(text)),
+  option: colorIfTty((text) => kleur.cyan(text)),
+  argument: colorIfTty((text) => kleur.magenta(text)),
+  description: colorIfTty((text) => kleur.white(text)),
+  muted: colorIfTty((text) => kleur.gray(text)),
+  accent: colorIfTty((text) => kleur.cyan(text)),
 };
 
-const helpThemeName = resolveHelpThemeName(rawCliArgs, process.env.ORACLE_HELP_THEME);
-const helpTheme = HELP_THEMES[helpThemeName];
-
-function resolveHelpThemeName(args: string[], envValue?: string): HelpThemeName {
-  const fromArgs = extractHelpThemeFromArgs(args);
-  if (isHelpThemeName(fromArgs)) {
-    return fromArgs;
-  }
-  const fromEnv = envValue?.toLowerCase();
-  if (isHelpThemeName(fromEnv)) {
-    return fromEnv;
-  }
-  return 'aurora';
-}
-
-function extractHelpThemeFromArgs(args: string[]): string | undefined {
-  for (let index = 0; index < args.length; index += 1) {
-    const current = args[index];
-    if (current === '--help-theme') {
-      const maybeTheme = args[index + 1];
-      if (maybeTheme) {
-        return maybeTheme.toLowerCase();
-      }
-    } else if (current.startsWith('--help-theme=')) {
-      return current.split('=')[1]?.toLowerCase();
-    }
-  }
-  return undefined;
-}
-
-function isHelpThemeName(value: string | undefined | null): value is HelpThemeName {
-  if (!value) {
-    return false;
-  }
-  return HELP_THEME_NAMES.includes(value as HelpThemeName);
-}
-
 const program = new Command();
+program.configureHelp({
+  styleTitle(title) {
+    return helpColors.section(title);
+  },
+  styleDescriptionText(text) {
+    return helpColors.description(text);
+  },
+  styleCommandText(text) {
+    return helpColors.command(text);
+  },
+  styleSubcommandText(text) {
+    return helpColors.command(text);
+  },
+  styleOptionText(text) {
+    return helpColors.option(text);
+  },
+  styleArgumentText(text) {
+    return helpColors.argument(text);
+  },
+});
 program
   .name('oracle')
   .description('One-shot GPT-5 Pro / GPT-5.1 tool for hard questions that benefit from large file context and server-side search.')
   .version(VERSION)
   .option('-p, --prompt <text>', 'User prompt to send to the model.')
   .option('-f, --file <paths...>', 'Paths to files or directories to append to the prompt; repeat, comma-separate, or supply a space-separated list.', collectPaths, [])
+  .option('--slug <words>', 'Custom session slug (3-5 words).')
   .option('-m, --model <model>', 'Model to target (gpt-5-pro | gpt-5.1).', validateModel, 'gpt-5-pro')
   .option('--files-report', 'Show token usage per attached file (also prints automatically when files exceed the token budget).', false)
   .addOption(
@@ -173,13 +137,19 @@ program
       .choices(['summary', 'json', 'full'])
       .preset('summary'),
   )
-  .addOption(
-    new Option('--help-theme <theme>', 'Choose a color palette for --help output.')
-      .choices(Array.from(HELP_THEME_NAMES))
-      .env('ORACLE_HELP_THEME'),
-  )
   .addOption(new Option('--exec-session <id>').hideHelp())
   .option('--render-markdown', 'Emit the assembled markdown bundle for prompt + files and exit.', false)
+  .option('--browser', 'Run the prompt via the ChatGPT web UI (Chrome automation).', false)
+  .option('--browser-chrome-profile <name>', 'Chrome profile name/path for cookie reuse.')
+  .option('--browser-chrome-path <path>', 'Explicit Chrome or Chromium executable path.')
+  .option('--browser-url <url>', `Override the ChatGPT URL (default ${CHATGPT_URL}).`)
+  .option('--browser-timeout <ms|s|m>', 'Maximum time to wait for an answer (default 900s).')
+  .option('--browser-input-timeout <ms|s|m>', 'Maximum time to wait for the prompt textarea (default 30s).')
+  .option('--browser-no-cookie-sync', 'Skip copying cookies from Chrome.', false)
+  .option('--browser-headless', 'Launch Chrome in headless mode.', false)
+  .option('--browser-hide-window', 'Hide the Chrome window after launch (macOS headful only).', false)
+  .option('--browser-keep-browser', 'Keep Chrome running after completion.', false)
+  .option('--browser-debug', 'Enable verbose browser automation logging.', false)
   .showHelpAfterError('(use --help for usage)');
 
 program
@@ -235,64 +205,55 @@ statusCommand
 const bold = (text: string): string => (isTty ? kleur.bold(text) : text);
 const dim = (text: string): string => (isTty ? kleur.dim(text) : text);
 
-program.addHelpText('beforeAll', () => renderHelpBanner(helpTheme));
-program.addHelpText('after', () => renderHelpFooter(helpTheme));
+program.addHelpText('beforeAll', renderHelpBanner);
+program.addHelpText('after', renderHelpFooter);
 
-function renderHelpBanner(theme: HelpTheme): string {
+function renderHelpBanner(): string {
   const subtitle = 'GPT-5 Pro/GPT-5.1 for tough questions with code/file context.';
-  return `${theme.banner(`Oracle CLI v${VERSION}`)} ${theme.subtitle(`— ${subtitle}`)}\n`;
+  return `${helpColors.banner(`Oracle CLI v${VERSION}`)} ${helpColors.subtitle(`— ${subtitle}`)}\n`;
 }
 
-function renderHelpFooter(theme: HelpTheme): string {
-  const tipLines = [
-    `${theme.bullet(' •')} Attach source files for best results, but keep total input under ~196k tokens.`,
-    `${theme.bullet(' •')} The model has no built-in knowledge of your project—open with the architecture, key components, and why you’re asking.`,
-    `${theme.bullet(' •')} Run ${theme.accent('--files-report')} to see per-file token impact before spending money.`,
-    `${theme.bullet(' •')} Non-preview runs spawn detached sessions so requests keep running even if your terminal closes.`,
+function renderHelpFooter(): string {
+  const tips = [
+    `${helpColors.bullet('•')} Attach source files for best results, but keep total input under ~196k tokens.`,
+    `${helpColors.bullet('•')} The model has no built-in knowledge of your project—open with the architecture, key components, and why you’re asking.`,
+    `${helpColors.bullet('•')} Run ${helpColors.accent('--files-report')} to inspect token spend before hitting the API.`,
+    `${helpColors.bullet('•')} Non-preview runs spawn detached sessions so they keep streaming even if your terminal closes.`,
+    `${helpColors.bullet('•')} Ask the model for a memorable 3–5 word slug and pass it via ${helpColors.accent('--slug "<words>"')} to keep session IDs tidy.`,
   ].join('\n');
 
-  const exampleEntries = [
-    {
-      command: `${program.name()} --prompt "Summarize risks" --file docs/risk.md --files-report --preview`,
-      description: 'Inspect tokens + files without calling the API.',
-    },
-    {
-      command: `${program.name()} --prompt "Explain bug" --file src/,docs/crash.log --files-report`,
-      description: 'Attach src/ plus docs/crash.log, launch a background session, and capture the Session ID.',
-    },
-    {
-      command: `${program.name()} status --hours 72 --limit 50`,
-      description: 'Show sessions from the last 72h (capped at 50 entries).',
-    },
-    {
-      command: `${program.name()} session <sessionId>`,
-      description: 'Attach to a running/completed session and stream the saved transcript.',
-    },
-  ];
+  const formatExample = (command: string, description: string): string =>
+    `${helpColors.command(`  ${command}`)}\n${helpColors.muted(`    ${description}`)}`;
 
-  const exampleLines = exampleEntries
-    .map((entry) => `${theme.command(`  ${entry.command}`)}\n${theme.muted(`    ${entry.description}`)}`)
-    .join('\n\n');
-
-  const paletteList = HELP_THEME_NAMES.map((name) =>
-    name === theme.name ? theme.command(name) : theme.accent(name),
-  ).join(theme.muted(', '));
-
-  const themeLines = [
-    `${theme.bullet(' •')} Current: ${theme.command(theme.name)}`,
-    `${theme.bullet(' •')} Try: ${paletteList}`,
-    `${theme.bullet(' •')} Switch via ${theme.accent('--help-theme <name>')} or ${theme.accent('ORACLE_HELP_THEME=<name>')}.`,
-  ].join('\n');
+  const examples = [
+    formatExample(
+      `${program.name()} --prompt "Summarize risks" --file docs/risk.md --files-report --preview`,
+      'Inspect tokens + files without calling the API.',
+    ),
+    formatExample(
+      `${program.name()} --prompt "Explain bug" --file src/,docs/crash.log --files-report`,
+      'Attach src/ plus docs/crash.log, launch a background session, and capture the Session ID.',
+    ),
+    formatExample(
+      `${program.name()} status --hours 72 --limit 50`,
+      'Show sessions from the last 72h (capped at 50 entries).',
+    ),
+    formatExample(
+      `${program.name()} session <sessionId>`,
+      'Attach to a running/completed session and stream the saved transcript.',
+    ),
+    formatExample(
+      `${program.name()} --prompt "Ship review" --slug "release-readiness-audit"`,
+      'Encourage the model to hand you a 3–5 word slug and pass it along with --slug.',
+    ),
+  ].join('\n\n');
 
   return `
-${theme.heading('Tips')}
-${tipLines}
+${helpColors.section('Tips')}
+${tips}
 
-${theme.heading('Examples')}
-${exampleLines}
-
-${theme.heading('Color Themes')}
-${themeLines}
+${helpColors.section('Examples')}
+${examples}
 `;
 }
 
@@ -310,6 +271,35 @@ function parseFloatOption(value: string): number {
     throw new InvalidArgumentError('Value must be a number.');
   }
   return parsed;
+}
+
+const DEFAULT_BROWSER_TIMEOUT_MS = 900_000;
+const DEFAULT_BROWSER_INPUT_TIMEOUT_MS = 30_000;
+const BROWSER_MODEL_LABELS: Record<ModelName, string> = {
+  'gpt-5-pro': 'GPT-5 Pro',
+  'gpt-5.1': 'ChatGPT 5.1',
+};
+
+function buildBrowserConfig(options: CliOptions): BrowserSessionConfig {
+  return {
+    chromeProfile: options.browserChromeProfile ?? null,
+    chromePath: options.browserChromePath ?? null,
+    url: options.browserUrl,
+    timeoutMs: options.browserTimeout ? parseDuration(options.browserTimeout, DEFAULT_BROWSER_TIMEOUT_MS) : undefined,
+    inputTimeoutMs: options.browserInputTimeout
+      ? parseDuration(options.browserInputTimeout, DEFAULT_BROWSER_INPUT_TIMEOUT_MS)
+      : undefined,
+    cookieSync: options.browserNoCookieSync ? false : undefined,
+    headless: options.browserHeadless ? true : undefined,
+    keepBrowser: options.browserKeepBrowser ? true : undefined,
+    hideWindow: options.browserHideWindow ? true : undefined,
+    desiredModel: mapModelToBrowserLabel(options.model),
+    debug: options.browserDebug ? true : undefined,
+  };
+}
+
+function mapModelToBrowserLabel(model: ModelName): string {
+  return BROWSER_MODEL_LABELS[model] ?? DEFAULT_MODEL_TARGET;
 }
 
 function validateModel(value: string): ModelName {
@@ -344,6 +334,7 @@ function buildRunOptions(options: CliOptions, overrides: Partial<RunOracleOption
     prompt: options.prompt,
     model: options.model,
     file: overrides.file ?? options.file ?? [],
+    slug: overrides.slug ?? options.slug,
     filesReport: overrides.filesReport ?? options.filesReport,
     maxInput: overrides.maxInput ?? options.maxInput,
     maxOutput: overrides.maxOutput ?? options.maxOutput,
@@ -363,6 +354,7 @@ function buildRunOptionsFromMetadata(metadata: SessionMetadata): RunOracleOption
     prompt: stored.prompt ?? '',
     model: (stored.model as ModelName) ?? 'gpt-5-pro',
     file: stored.file ?? [],
+    slug: stored.slug,
     filesReport: stored.filesReport,
     maxInput: stored.maxInput,
     maxOutput: stored.maxOutput,
@@ -374,6 +366,14 @@ function buildRunOptionsFromMetadata(metadata: SessionMetadata): RunOracleOption
     apiKey: undefined,
     sessionId: metadata.id,
   };
+}
+
+function getSessionMode(metadata: SessionMetadata): SessionMode {
+  return metadata.mode ?? metadata.options?.mode ?? 'api';
+}
+
+function getBrowserConfigFromMetadata(metadata: SessionMetadata): BrowserSessionConfig | undefined {
+  return metadata.options?.browserConfig ?? metadata.browser?.config;
 }
 
 async function runRootCommand(options: CliOptions): Promise<void> {
@@ -413,6 +413,9 @@ async function runRootCommand(options: CliOptions): Promise<void> {
   }
 
   if (previewMode) {
+    if (options.browser) {
+      throw new Error('--browser cannot be combined with --preview.');
+    }
     if (!options.prompt) {
       throw new Error('Prompt is required when using --preview.');
     }
@@ -429,15 +432,30 @@ async function runRootCommand(options: CliOptions): Promise<void> {
     await readFiles(options.file, { cwd: process.cwd() });
   }
 
+  const sessionMode: SessionMode = options.browser ? 'browser' : 'api';
+  const browserConfig = sessionMode === 'browser' ? buildBrowserConfig(options) : undefined;
+
   await ensureSessionStorage();
   const baseRunOptions = buildRunOptions(options, { preview: false, previewMode: undefined });
-  const sessionMeta = await initializeSession(baseRunOptions, process.cwd());
+  const sessionMeta = await initializeSession(
+    {
+      ...baseRunOptions,
+      mode: sessionMode,
+      browserConfig,
+    },
+    process.cwd(),
+  );
   const liveRunOptions: RunOracleOptions = { ...baseRunOptions, sessionId: sessionMeta.id };
-  await runInteractiveSession(sessionMeta, liveRunOptions);
+  await runInteractiveSession(sessionMeta, liveRunOptions, sessionMode, browserConfig);
   console.log(chalk.bold(`Session ${sessionMeta.id} completed`));
 }
 
-async function runInteractiveSession(sessionMeta: SessionMetadata, runOptions: RunOracleOptions): Promise<void> {
+async function runInteractiveSession(
+  sessionMeta: SessionMetadata,
+  runOptions: RunOracleOptions,
+  mode: SessionMode,
+  browserConfig?: BrowserSessionConfig,
+): Promise<void> {
   const { logLine, writeChunk, stream } = createSessionLogWriter(sessionMeta.id);
   let headerAugmented = false;
   const combinedLog = (message = ''): void => {
@@ -455,28 +473,16 @@ async function runInteractiveSession(sessionMeta: SessionMetadata, runOptions: R
     return process.stdout.write(chunk);
   };
   try {
-    await updateSessionMetadata(sessionMeta.id, { status: 'running', startedAt: new Date().toISOString() });
-    const result = await runOracle(runOptions, {
+    await performSessionRun({
+      sessionMeta,
+      runOptions,
+      mode,
+      browserConfig,
+      cwd: process.cwd(),
       log: combinedLog,
       write: combinedWrite,
     });
-    if (result.mode !== 'live') {
-      throw new Error('Unexpected preview result while running an interactive session.');
-    }
-    await updateSessionMetadata(sessionMeta.id, {
-      status: 'completed',
-      completedAt: new Date().toISOString(),
-      usage: result.usage,
-      elapsedMs: result.elapsedMs,
-    });
-  } catch (error: unknown) {
-    const message = formatError(error);
-    combinedLog(`ERROR: ${message}`);
-    await updateSessionMetadata(sessionMeta.id, {
-      status: 'error',
-      completedAt: new Date().toISOString(),
-      errorMessage: message,
-    });
+  } catch (error) {
     throw error;
   } finally {
     stream.end();
@@ -491,18 +497,99 @@ async function executeSession(sessionId: string) {
     return;
   }
   const runOptions = buildRunOptionsFromMetadata(metadata);
+  const sessionMode = getSessionMode(metadata);
+  const browserConfig = getBrowserConfigFromMetadata(metadata);
   const { logLine, writeChunk, stream } = createSessionLogWriter(sessionId);
   try {
-    await updateSessionMetadata(sessionId, { status: 'running', startedAt: new Date().toISOString() });
-    const result = await runOracle(runOptions, {
-      cwd: metadata.cwd,
+    await performSessionRun({
+      sessionMeta: metadata,
+      runOptions,
+      mode: sessionMode,
+      browserConfig,
+      cwd: metadata.cwd ?? process.cwd(),
       log: logLine,
       write: writeChunk,
     });
-    if (result.mode !== 'live') {
-      throw new Error('Unexpected preview result while executing a stored session.');
+  } catch {
+    // Errors are already logged to the session log; keep quiet to mirror stored-session behavior.
+  } finally {
+    stream.end();
+  }
+}
+
+interface SessionRunParams {
+  sessionMeta: SessionMetadata;
+  runOptions: RunOracleOptions;
+  mode: SessionMode;
+  browserConfig?: BrowserSessionConfig;
+  cwd: string;
+  log: (message?: string) => void;
+  write: (chunk: string) => boolean;
+}
+
+interface BrowserExecutionResult {
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    reasoningTokens: number;
+    totalTokens: number;
+  };
+  elapsedMs: number;
+  runtime: BrowserRuntimeMetadata;
+}
+
+interface BrowserPromptArtifacts {
+  markdown: string;
+  estimatedInputTokens: number;
+}
+
+async function performSessionRun({
+  sessionMeta,
+  runOptions,
+  mode,
+  browserConfig,
+  cwd,
+  log,
+  write,
+}: SessionRunParams): Promise<void> {
+  await updateSessionMetadata(sessionMeta.id, {
+    status: 'running',
+    startedAt: new Date().toISOString(),
+    mode,
+    ...(browserConfig ? { browser: { config: browserConfig } } : {}),
+  });
+  try {
+    if (mode === 'browser') {
+      if (!browserConfig) {
+        throw new Error('Missing browser configuration for session.');
+      }
+      const result = await runBrowserSessionExecution({
+        runOptions,
+        browserConfig,
+        cwd,
+        log,
+      });
+      await updateSessionMetadata(sessionMeta.id, {
+        status: 'completed',
+        completedAt: new Date().toISOString(),
+        usage: result.usage,
+        elapsedMs: result.elapsedMs,
+        browser: {
+          config: browserConfig,
+          runtime: result.runtime,
+        },
+      });
+      return;
     }
-    await updateSessionMetadata(sessionId, {
+    const result = await runOracle(runOptions, {
+      cwd,
+      log,
+      write,
+    });
+    if (result.mode !== 'live') {
+      throw new Error('Unexpected preview result while running a session.');
+    }
+    await updateSessionMetadata(sessionMeta.id, {
       status: 'completed',
       completedAt: new Date().toISOString(),
       usage: result.usage,
@@ -510,15 +597,85 @@ async function executeSession(sessionId: string) {
     });
   } catch (error: unknown) {
     const message = formatError(error);
-    logLine(`ERROR: ${message}`);
-    await updateSessionMetadata(sessionId, {
+    log(`ERROR: ${message}`);
+    await updateSessionMetadata(sessionMeta.id, {
       status: 'error',
       completedAt: new Date().toISOString(),
       errorMessage: message,
+      mode,
+      browser: browserConfig ? { config: browserConfig } : undefined,
     });
-  } finally {
-    stream.end();
+    throw error;
   }
+}
+
+async function runBrowserSessionExecution({
+  runOptions,
+  browserConfig,
+  cwd,
+  log,
+}: {
+  runOptions: RunOracleOptions;
+  browserConfig: BrowserSessionConfig;
+  cwd: string;
+  log: (message?: string) => void;
+}): Promise<BrowserExecutionResult> {
+  const promptArtifacts = await assembleBrowserPrompt(runOptions, cwd);
+  const headerLine = `Oracle (${VERSION}) launching browser mode (${runOptions.model}) with ~${promptArtifacts.estimatedInputTokens.toLocaleString()} tokens`;
+  log(headerLine);
+  log(dim('Chrome automation does not stream output; this may take a minute...'));
+  const browserResult = await runBrowserMode({
+    prompt: promptArtifacts.markdown,
+    config: browserConfig,
+    log,
+  });
+  if (!runOptions.silent) {
+    log(chalk.bold('Answer:'));
+    log(browserResult.answerMarkdown || browserResult.answerText || chalk.dim('(no text output)'));
+    log('');
+  }
+  const usage = {
+    inputTokens: promptArtifacts.estimatedInputTokens,
+    outputTokens: browserResult.answerTokens,
+    reasoningTokens: 0,
+    totalTokens: promptArtifacts.estimatedInputTokens + browserResult.answerTokens,
+  };
+  const tokensDisplay = `${usage.inputTokens}/${usage.outputTokens}/${usage.reasoningTokens}/${usage.totalTokens}`;
+  const statsParts = [`${runOptions.model}[browser]`, `tok(i/o/r/t)=${tokensDisplay}`];
+  if (runOptions.file && runOptions.file.length > 0) {
+    statsParts.push(`files=${runOptions.file.length}`);
+  }
+  log(chalk.blue(`Finished in ${formatElapsed(browserResult.tookMs)} (${statsParts.join(' | ')})`));
+  return {
+    usage,
+    elapsedMs: browserResult.tookMs,
+    runtime: {
+      chromePid: browserResult.chromePid,
+      chromePort: browserResult.chromePort,
+      userDataDir: browserResult.userDataDir,
+    },
+  };
+}
+
+async function assembleBrowserPrompt(runOptions: RunOracleOptions, cwd: string): Promise<BrowserPromptArtifacts> {
+  const files = await readFiles(runOptions.file ?? [], { cwd });
+  const userPrompt = buildPrompt(runOptions.prompt, files, cwd);
+  const systemPrompt = runOptions.system?.trim() || DEFAULT_SYSTEM_PROMPT;
+  const sections = createFileSections(files, cwd);
+  const lines = ['[SYSTEM]', systemPrompt, '', '[USER]', userPrompt, ''];
+  sections.forEach((section) => {
+    lines.push(`[FILE: ${section.displayPath}]`, section.content.trimEnd(), '');
+  });
+  const markdown = lines.join('\n').trimEnd();
+  const tokenizer = MODEL_CONFIGS[runOptions.model].tokenizer;
+  const estimatedInputTokens = tokenizer(
+    [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
+    ],
+    TOKENIZER_OPTIONS,
+  );
+  return { markdown, estimatedInputTokens };
 }
 
 async function showStatus({ hours, includeAll, limit, showExamples = false }: ShowStatusOptions) {
