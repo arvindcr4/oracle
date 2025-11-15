@@ -17,6 +17,7 @@ import {
   waitForAttachmentCompletion,
 } from './pageActions.js';
 import { estimateTokenCount } from './utils.js';
+import { formatElapsed } from '../oracle/format.js';
 
 export type { BrowserAutomationConfig, BrowserRunOptions, BrowserRunResult } from './types.js';
 export { CHATGPT_URL, DEFAULT_MODEL_TARGET } from './constants.js';
@@ -217,6 +218,7 @@ function startThinkingStatusMonitor(Runtime: ChromeClient['Runtime'], logger: Br
   let stopped = false;
   let pending = false;
   let lastMessage: string | null = null;
+  const startedAt = Date.now();
   const interval = setInterval(async () => {
     // biome-ignore lint/nursery/noUnnecessaryConditions: stop flag flips asynchronously
     if (stopped || pending) {
@@ -227,7 +229,8 @@ function startThinkingStatusMonitor(Runtime: ChromeClient['Runtime'], logger: Br
       const nextMessage = await readThinkingStatus(Runtime);
       if (nextMessage && nextMessage !== lastMessage) {
         lastMessage = nextMessage;
-        logger(`Pro thinking: ${nextMessage}`);
+        const elapsedText = formatElapsed(Date.now() - startedAt);
+        logger(`[${elapsedText} / ~10m] Pro thinking: ${nextMessage}`);
       }
     } catch {
       // ignore DOM polling errors
