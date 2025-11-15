@@ -214,7 +214,14 @@ function buildModelSelectionExpression(targetModel: string): string {
     pointerClick();
     return new Promise((resolve) => {
       const start = performance.now();
+      const ensureMenuOpen = () => {
+        const menuOpen = document.querySelector('[role="menu"], [data-radix-collection-root]');
+        if (!menuOpen && performance.now() - lastPointerClick > 300) {
+          pointerClick();
+        }
+      };
       const attempt = () => {
+        ensureMenuOpen();
         const option = findOption();
         if (option) {
           if (optionIsSelected(option)) {
