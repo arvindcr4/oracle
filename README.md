@@ -4,6 +4,12 @@
   <img src="./README-header.png" alt="Oracle CLI header banner" width="720">
 </p>
 
+<p align="center">
+  <a href="https://www.npmjs.com/package/@steipete/oracle"><img src="https://img.shields.io/npm/v/@steipete/oracle?style=for-the-badge&logo=npm&logoColor=white" alt="npm version"></a>
+  <a href="https://github.com/steipete/oracle/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/steipete/oracle/ci.yml?branch=main&style=for-the-badge&label=tests" alt="CI Status"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" alt="MIT License"></a>
+</p>
+
 Oracle is a one-shot CLI for GPT-5 Pro / GPT-5.1 when you need deep reasoning plus lots of local context. Point it at your prompt and the relevant files (code, logs, docs); Oracle bundles everything into either the Responses API (needs `OPENAI_API_KEY`) or the ChatGPT web UI (no key required), keeps the run alive in the background, and records a searchable transcript.
 
 ## Quick start
