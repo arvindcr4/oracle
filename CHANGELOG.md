@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.0.1 — 2025-11-15
+
+### Fixed
+- Corrected npm binary mapping so `oracle` is installed as an executable. Published with `--tag beta`.
+
 ## 1.0.0 — 2025-11-15
 
 ### Added
@@ -18,4 +23,3 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - `oracle status` and `oracle session` no longer demand `--prompt` when used directly.
-

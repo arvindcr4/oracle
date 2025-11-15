@@ -1,11 +1,11 @@
 {
   "name": "@steipete/oracle",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "CLI wrapper around OpenAI Responses API with GPT-5 Pro and GPT-5.1 high reasoning modes.",
   "type": "module",
   "main": "dist/bin/oracle-cli.js",
   "bin": {
-    "oracle": "./dist/bin/oracle-cli.js"
+    "oracle": "dist/bin/oracle-cli.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
