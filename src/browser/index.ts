@@ -17,6 +17,7 @@ import {
   waitForAttachmentCompletion,
   readAssistantSnapshot,
 } from './pageActions.js';
+import { navigateToGemini, ensureGeminiPromptReady, submitGeminiPrompt, waitForGeminiResponse } from '../gemini/actions.js';
 import { estimateTokenCount, withRetries } from './utils.js';
 import { formatElapsed } from '../oracle/format.js';
 
@@ -33,6 +34,7 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
   const attachments: BrowserAttachment[] = options.attachments ?? [];
 
   const config = resolveBrowserConfig(options.config);
+  const isGemini = typeof config.url === 'string' && config.url.includes('gemini.google.com');
   const logger: BrowserLogger = options.log ?? ((_message: string) => {});
   if (logger.verbose === undefined) {
     logger.verbose = Boolean(config.debug);
@@ -105,64 +107,81 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
       logger('Skipping Chrome cookie sync (--browser-no-cookie-sync)');
     }
 
-    await navigateToChatGPT(Page, Runtime, config.url, logger);
-    await ensureNotBlocked(Runtime, config.headless, logger);
-    await ensurePromptReady(Runtime, config.inputTimeoutMs, logger);
-    logger(`Prompt textarea ready (initial focus, ${promptText.length.toLocaleString()} chars queued)`);
-    if (config.desiredModel) {
-      await withRetries(
-        () => ensureModelSelection(Runtime, config.desiredModel as string, logger),
+    if (isGemini) {
+      await navigateToGemini(Page, Runtime, config.url, logger);
+      await ensureGeminiPromptReady(Runtime, config.inputTimeoutMs, logger);
+      logger(`Gemini prompt ready (${promptText.length.toLocaleString()} chars queued)`);
+      if (attachments.length > 0) {
+        logger(
+          'Gemini mode does not yet support file uploads; attached files were already inlined into the prompt when possible.',
+        );
+      }
+      await submitGeminiPrompt(Runtime, promptText, logger);
+      const text = await waitForGeminiResponse(Runtime, config.timeoutMs, logger);
+      answerText = text;
+      answerMarkdown = text;
+    } else {
+      await navigateToChatGPT(Page, Runtime, config.url, logger);
+      await ensureNotBlocked(Runtime, config.headless, logger);
+      await ensurePromptReady(Runtime, config.inputTimeoutMs, logger);
+      logger(`Prompt textarea ready (initial focus, ${promptText.length.toLocaleString()} chars queued)`);
+      if (config.desiredModel) {
+        await withRetries(
+          () => ensureModelSelection(Runtime, config.desiredModel as string, logger),
+          {
+            retries: 2,
+            delayMs: 300,
+            onRetry: (attempt, error) => {
+              if (options.verbose) {
+                logger(
+                  `[retry] Model picker attempt ${attempt + 1}: ${error instanceof Error ? error.message : error}`,
+                );
+              }
+            },
+          },
+        );
+        await ensurePromptReady(Runtime, config.inputTimeoutMs, logger);
+        logger(`Prompt textarea ready (after model switch, ${promptText.length.toLocaleString()} chars queued)`);
+      }
+      if (attachments.length > 0) {
+        if (!DOM) {
+          throw new Error('Chrome DOM domain unavailable while uploading attachments.');
+        }
+        for (const attachment of attachments) {
+          logger(`Uploading attachment: ${attachment.displayPath}`);
+          await uploadAttachmentFile({ runtime: Runtime, dom: DOM }, attachment, logger);
+        }
+        const waitBudget = Math.max(config.inputTimeoutMs ?? 30_000, 30_000);
+        await waitForAttachmentCompletion(Runtime, waitBudget, logger);
+        logger('All attachments uploaded');
+      }
+      await submitPrompt({ runtime: Runtime, input: Input }, promptText, logger);
+      stopThinkingMonitor = startThinkingStatusMonitor(Runtime, logger, options.verbose ?? false);
+      const answer = await waitForAssistantResponse(Runtime, config.timeoutMs, logger);
+      answerText = answer.text;
+      answerHtml = answer.html ?? '';
+      const copiedMarkdown = await withRetries(
+        async () => {
+          const attempt = await captureAssistantMarkdown(Runtime, answer.meta, logger);
+          if (!attempt) {
+            throw new Error('copy-missing');
+          }
+          return attempt;
+        },
         {
           retries: 2,
-          delayMs: 300,
+          delayMs: 350,
           onRetry: (attempt, error) => {
             if (options.verbose) {
-              logger(`[retry] Model picker attempt ${attempt + 1}: ${error instanceof Error ? error.message : error}`);
+              logger(
+                `[retry] Markdown capture attempt ${attempt + 1}: ${error instanceof Error ? error.message : error}`,
+              );
             }
           },
         },
-      );
-      await ensurePromptReady(Runtime, config.inputTimeoutMs, logger);
-      logger(`Prompt textarea ready (after model switch, ${promptText.length.toLocaleString()} chars queued)`);
+      ).catch(() => null);
+      answerMarkdown = copiedMarkdown ?? answerText;
     }
-    if (attachments.length > 0) {
-      if (!DOM) {
-        throw new Error('Chrome DOM domain unavailable while uploading attachments.');
-      }
-      for (const attachment of attachments) {
-        logger(`Uploading attachment: ${attachment.displayPath}`);
-        await uploadAttachmentFile({ runtime: Runtime, dom: DOM }, attachment, logger);
-      }
-      const waitBudget = Math.max(config.inputTimeoutMs ?? 30_000, 30_000);
-      await waitForAttachmentCompletion(Runtime, waitBudget, logger);
-      logger('All attachments uploaded');
-    }
-    await submitPrompt({ runtime: Runtime, input: Input }, promptText, logger);
-    stopThinkingMonitor = startThinkingStatusMonitor(Runtime, logger, options.verbose ?? false);
-    const answer = await waitForAssistantResponse(Runtime, config.timeoutMs, logger);
-    answerText = answer.text;
-    answerHtml = answer.html ?? '';
-    const copiedMarkdown = await withRetries(
-      async () => {
-        const attempt = await captureAssistantMarkdown(Runtime, answer.meta, logger);
-        if (!attempt) {
-          throw new Error('copy-missing');
-        }
-        return attempt;
-      },
-      {
-        retries: 2,
-        delayMs: 350,
-        onRetry: (attempt, error) => {
-          if (options.verbose) {
-            logger(
-              `[retry] Markdown capture attempt ${attempt + 1}: ${error instanceof Error ? error.message : error}`,
-            );
-          }
-        },
-      },
-    ).catch(() => null);
-    answerMarkdown = copiedMarkdown ?? answerText;
     stopThinkingMonitor?.();
     runStatus = 'complete';
     const durationMs = Date.now() - startedAt;

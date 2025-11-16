@@ -18,6 +18,7 @@ import type { SessionMetadata, SessionMode, BrowserSessionConfig } from '../src/
 import { runOracle, renderPromptMarkdown, readFiles } from '../src/oracle.js';
 import type { ModelName, PreviewMode, RunOracleOptions } from '../src/oracle.js';
 import { CHATGPT_URL } from '../src/browserMode.js';
+import { GEMINI_URL } from '../src/gemini/constants.js';
 import { applyHelpStyling } from '../src/cli/help.js';
 import {
   collectPaths,
@@ -132,8 +133,8 @@ program
   .addOption(
     new Option(
       '-e, --engine <mode>',
-      'Execution engine (api | browser). If omitted, Oracle picks api when OPENAI_API_KEY is set, otherwise browser.',
-    ).choices(['api', 'browser'])
+      'Execution engine (api | browser | gemini). If omitted, Oracle picks api when OPENAI_API_KEY is set, otherwise browser.',
+    ).choices(['api', 'browser', 'gemini'])
   )
   .option('--files-report', 'Show token usage per attached file (also prints automatically when files exceed the token budget).', false)
   .option('-v, --verbose', 'Enable verbose logging for all operations.', false)
@@ -357,7 +358,7 @@ async function runRootCommand(options: CliOptions): Promise<void> {
     console.log(chalk.yellow('`--browser` is deprecated; use `--engine browser` instead.'));
   }
   const cliModelArg = normalizeModelOption(options.model) || 'gpt-5-pro';
-  const resolvedModel: ModelName = engine === 'browser' ? inferModelFromLabel(cliModelArg) : resolveApiModel(cliModelArg);
+  const resolvedModel: ModelName = engine === 'api' ? resolveApiModel(cliModelArg) : inferModelFromLabel(cliModelArg);
   const resolvedOptions: ResolvedCliOptions = { ...options, model: resolvedModel };
 
   if (await handleStatusFlag(options, { attachSession, showStatus })) {
@@ -387,8 +388,8 @@ async function runRootCommand(options: CliOptions): Promise<void> {
   }
 
   if (previewMode) {
-    if (engine === 'browser') {
-      throw new Error('--engine browser cannot be combined with --preview.');
+    if (engine !== 'api') {
+      throw new Error('--preview is only supported for --engine api.');
     }
     if (!options.prompt) {
       throw new Error('Prompt is required when using --preview.');
@@ -421,15 +422,16 @@ async function runRootCommand(options: CliOptions): Promise<void> {
     await readFiles(options.file, { cwd: process.cwd() });
   }
 
-  const sessionMode: SessionMode = engine === 'browser' ? 'browser' : 'api';
+  const sessionMode: SessionMode = engine === 'api' ? 'api' : 'browser';
   const browserModelLabelOverride =
-    sessionMode === 'browser' ? resolveBrowserModelLabel(cliModelArg, resolvedModel) : undefined;
+    engine === 'browser' ? resolveBrowserModelLabel(cliModelArg, resolvedModel) : undefined;
   const browserConfig =
-    sessionMode === 'browser'
+    engine === 'browser' || engine === 'gemini'
       ? buildBrowserConfig({
           ...options,
           model: resolvedModel,
           browserModelLabel: browserModelLabelOverride,
+          browserUrl: engine === 'gemini' && !options.browserUrl ? GEMINI_URL : options.browserUrl,
         })
       : undefined;
 

@@ -13,12 +13,13 @@
 
 Oracle gives your agents a simple, reliable way to **bundle a prompt plus the right files and hand them to another AI**. It currently speaks GPT-5.1 and GPT-5 Pro; Pro runs can take up to ten minutes and often return remarkably strong answers.
 
-## Two engines, one CLI
+## Engines, one CLI
 
 - **API engine** — Calls the OpenAI Responses API. Needs `OPENAI_API_KEY`.
 - **Browser engine** — Automates ChatGPT in Chrome so you can use your Pro account directly. Toggle with `--engine browser`; no API key required.
+- **Gemini engine (experimental)** — Uses the same Chrome automation stack but targets Gemini in your signed-in Google profile via `--engine gemini`.
 
-If you omit `--engine`, Oracle prefers the API engine when `OPENAI_API_KEY` is present; otherwise it falls back to browser mode. Switch explicitly with `-e, --engine {api|browser}` when you want to override the auto choice. Everything else (prompt assembly, file handling, session logging) stays the same.
+If you omit `--engine`, Oracle prefers the API engine when `OPENAI_API_KEY` is present; otherwise it falls back to browser mode. Switch explicitly with `-e, --engine {api|browser|gemini}` when you want to override the auto choice. Everything else (prompt assembly, file handling, session logging) stays the same.
 
 ## Quick start
 
@@ -62,7 +63,7 @@ oracle session <id>                 # replay a run locally
 | --- | --- |
 | `-p, --prompt <text>` | Required prompt. |
 | `-f, --file <paths...>` | Attach files/dirs (supports globs and `!` excludes). |
-| `-e, --engine <api|browser>` | Choose API or browser automation. Omitted: API when `OPENAI_API_KEY` is set, otherwise browser. |
+| `-e, --engine <api|browser|gemini>` | Choose API, ChatGPT browser, or Gemini browser automation. Omitted: API when `OPENAI_API_KEY` is set, otherwise browser. |
 | `-m, --model <name>` | `gpt-5-pro` (default) or `gpt-5.1`. |
 | `--files-report` | Print per-file token usage. |
 | `--preview [summary|json|full]` | Inspect the request without sending. |

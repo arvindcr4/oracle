@@ -26,7 +26,7 @@ export async function runDryRunSummary(
     version,
     log,
   }: {
-    engine: 'api' | 'browser';
+    engine: 'api' | 'browser' | 'gemini';
     runOptions: RunOracleOptions;
     cwd: string;
     version: string;
@@ -34,11 +34,11 @@ export async function runDryRunSummary(
   },
   deps: DryRunDeps = {},
 ): Promise<void> {
-  if (engine === 'browser') {
-    await runBrowserDryRun({ runOptions, cwd, version, log }, deps);
+  if (engine === 'api') {
+    await runApiDryRun({ runOptions, cwd, version, log }, deps);
     return;
   }
-  await runApiDryRun({ runOptions, cwd, version, log }, deps);
+  await runBrowserDryRun({ runOptions, cwd, version, log }, deps);
 }
 
 async function runApiDryRun(

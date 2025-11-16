@@ -1,4 +1,4 @@
-export type EngineMode = 'api' | 'browser';
+export type EngineMode = 'api' | 'browser' | 'gemini';
 
 /**
  * Determine which engine to use based on CLI flags and the environment.
@@ -23,4 +23,3 @@ export function resolveEngine(
   }
   return env.OPENAI_API_KEY ? 'api' : 'browser';
 }
-
