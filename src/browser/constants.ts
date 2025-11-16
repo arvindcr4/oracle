@@ -1,6 +1,6 @@
 export const CHATGPT_URL = 'https://chatgpt.com/';
 export const DEFAULT_MODEL_TARGET = 'ChatGPT 5.1';
-export const COOKIE_URLS = ['https://chatgpt.com', 'https://chat.openai.com'];
+export const COOKIE_URLS = ['https://chatgpt.com', 'https://chat.openai.com', 'https://gemini.google.com'];
 
 export const INPUT_SELECTORS = [
   'textarea[data-id="prompt-textarea"]',

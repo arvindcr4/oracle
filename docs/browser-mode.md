@@ -7,7 +7,7 @@
 1. **Prompt assembly** – we reuse the normal prompt builder (`buildPrompt`) and the markdown renderer. Browser mode pastes the system + user text (no special markers) into the ChatGPT composer and then uploads each resolved `--file` individually (via the hidden `<input type="file">`) before submitting the prompt.
 2. **Automation stack** – code lives in `src/browserMode.ts` and is a lightly refactored version of the `oraclecheap` utility:
    - Launches Chrome via `chrome-launcher` and connects with `chrome-remote-interface`.
-   - (Optional) copies cookies from the requested macOS Chrome profile via `chrome-cookies-secure` so users stay signed in.
+   - (Optional) copies cookies from the requested macOS Chrome profile via `chrome-cookies-secure` so users stay signed in (ChatGPT + Gemini domains are both included when present in the profile).
    - Navigates to `chatgpt.com`, switches the model (currently just label-matching for GPT-5.1/GPT-5 Pro), pastes the prompt, waits for completion, and copies the markdown via the built-in “copy turn” button.
    - When files are queued, we upload them one-by-one via the hidden `<input type="file">` and wait for ChatGPT to re-enable the send button before submitting the combined system+user prompt.
    - Cleans up the temporary profile unless `--browser-keep-browser` is passed.
