@@ -229,91 +229,39 @@ export async function verifyAttachmentsVisible(
 	let lastSnapshotKey: string | null = null;
 	let stableIterations = 0;
 
-	// Selectors that might contain attachment pills/badges in ChatGPT's composer
-	const ATTACHMENT_SELECTORS = [
-		'[data-testid*="attachment-pill"]',
-		'[data-testid*="attachment"]',
-		'[data-testid*="file-preview"]',
-		'[aria-label*="attachment"]',
-		'button[aria-label*="Remove attachment"]',
-		'button[aria-label*="remove file"]',
-		'[class*="attachment"]',
-		'[class*="Attachment"]',
-		".attachment-pill",
-		".uploaded-file-chip",
-		".file-attachment",
-		// Additional selectors for newer ChatGPT UI versions
-		'[data-testid*="file-attachment"]',
-		'[data-testid*="file-upload"]',
-		'[role="button"][aria-label*="file"]',
-		'[role="button"][title*="file"]',
-	];
-
-	const expression = `(() => {
-    const selectors = ${JSON.stringify(ATTACHMENT_SELECTORS)};
-    const results = [];
-
-    for (const selector of selectors) {
-      const elements = document.querySelectorAll(selector);
-      for (const el of elements) {
-        // Check if element is visible
-        if (!el.offsetParent && el !== document.body) continue;
+	const expression = `
+    (() => {
+      const isElementVisible = (el) => {
+        if (!el) return false;
         const style = window.getComputedStyle(el);
-        if (style.visibility === 'hidden' || style.display === 'none') continue;
+        const rect = el.getBoundingClientRect();
+        return (
+          style.display !== 'none' &&
+          style.visibility !== 'hidden' &&
+          style.opacity !== '0' &&
+          rect.width > 0 &&
+          rect.height > 0 &&
+          // Check if the element is within the viewport
+          rect.top >= 0 &&
+          rect.left >= 0 &&
+          rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) &&
+          rect.right <= (window.innerWidth || document.documentElement.clientWidth)
+        );
+      };
 
-        // Extract filename heuristically
-        let filename = null;
-        
-        // Try data attributes
-        filename = el.getAttribute('data-filename') || el.getAttribute('data-file-name');
-        
-        // Try title attribute
-        if (!filename) {
-          filename = el.getAttribute('title');
-        }
-        
-        // Try aria-label (strip common prefixes like "Remove attachment ")
-        if (!filename) {
-          const ariaLabel = el.getAttribute('aria-label');
-          if (ariaLabel) {
-            filename = ariaLabel
-              .replace(/^(remove|delete|close) +(attachment|file) +/i, '')
-              .replace(/ +(attachment|file)$/i, '')
-              .trim();
-          }
-        }
-        
-        // Try text content from specific child elements
-        if (!filename) {
-          const filenameSpan = el.querySelector('[class*="filename"], [data-testid*="filename"]');
-          if (filenameSpan && filenameSpan.textContent) {
-            filename = filenameSpan.textContent.trim();
-          }
-        }
-        
-        // Try direct text content (but filter out button labels)
-        if (!filename) {
-          const text = el.textContent?.trim() ?? '';
-          if (text && text.length > 0 && text.length < 200 && !text.match(/^(remove|delete|close|upload)$/i)) {
-            filename = text;
-          }
-        }
-        
-        // Try image alt text
-        if (!filename) {
-          const img = el.querySelector('img[alt]');
-          if (img) {
-            filename = img.getAttribute('alt');
-          }
-        }
+      const ATTACHMENT_SELECTORS = [
+        '[data-testid*="attachment-pill"]',
+        'button[aria-label*="Remove attachment"]',
+        '[data-testid*="file-attachment-container"]',
+      ];
 
-          if (filename) {
-            // Normalize filename
-            filename = filename
-            .trim()
-            .replace(/^["']|["']$/g, '') // Remove wrapping quotes
-            .replace(/[\t\n\r ]+/g, ' ') // Collapse common whitespace variants
-            .trim();
+      const results = [];
+      for (const selector of ATTACHMENT_SELECTORS) {
+        document.querySelectorAll(selector).forEach((el) => {
+          if (!isElementVisible(el)) return;
+
+          let filename = el.getAttribute('aria-label')?.replace(/Remove attachment/i, '').trim() ||
+                         el.querySelector('[data-testid="file-attachment-name"]')?.textContent?.trim();
 
           if (filename) {
             results.push({
@@ -322,12 +270,11 @@ export async function verifyAttachmentsVisible(
               outerHTML: el.outerHTML?.substring(0, 512) ?? '',
             });
           }
-        }
+        });
       }
-    }
-
-    return results;
-  })()`;
+      return results;
+    })()
+  `;
 
 	while (Date.now() < deadline) {
 		try {
@@ -346,8 +293,6 @@ export async function verifyAttachmentsVisible(
 					stableIterations = 0;
 				}
 
-				// Wait for a few consecutive identical snapshots so that
-				// multi-file uploads have time to settle before we report.
 				if (stableIterations >= 2) {
 					logger?.(
 						`verifyAttachmentsVisible: detected ${attachments.length} visible attachment(s)`,
@@ -367,7 +312,6 @@ export async function verifyAttachmentsVisible(
 		await delay(pollInterval);
 	}
 
-	// Timeout reached - return whatever we have (likely empty)
 	logger?.("verifyAttachmentsVisible: timeout reached, no attachments detected");
 	return [];
 }
