@@ -4,6 +4,7 @@ import {
 	GENERIC_FILE_INPUT_SELECTOR,
 	SEND_BUTTON_SELECTOR,
 	UPLOAD_STATUS_SELECTORS,
+	CONVERSATION_TURN_SELECTOR,
 } from "../constants.js";
 import { logDomFailure } from "../domDebug.js";
 import {
@@ -231,6 +232,9 @@ export async function verifyAttachmentsVisible(
 
 	const expression = `
     (() => {
+      const SEND_BUTTON_SELECTOR = ${JSON.stringify(SEND_BUTTON_SELECTOR)};
+      const CONVERSATION_SELECTOR = ${JSON.stringify(CONVERSATION_TURN_SELECTOR)};
+
       const isElementVisible = (el) => {
         if (!el) return false;
         const style = window.getComputedStyle(el);
@@ -241,7 +245,6 @@ export async function verifyAttachmentsVisible(
           style.opacity !== '0' &&
           rect.width > 0 &&
           rect.height > 0 &&
-          // Check if the element is within the viewport
           rect.top >= 0 &&
           rect.left >= 0 &&
           rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) &&
@@ -255,13 +258,23 @@ export async function verifyAttachmentsVisible(
         '[data-testid*="file-attachment-container"]',
       ];
 
+      // Scope detection to the active composer: we only want
+      // attachments that are currently attached to the input area,
+      // not historical files inside previous conversation turns.
+      const sendButton = document.querySelector(SEND_BUTTON_SELECTOR);
+      const composerRoot =
+        (sendButton && (sendButton.closest('form') || sendButton.parentElement)) || document.body;
+
       const results = [];
       for (const selector of ATTACHMENT_SELECTORS) {
         document.querySelectorAll(selector).forEach((el) => {
+          if (!composerRoot.contains(el)) return;
+          if (el.closest(CONVERSATION_SELECTOR)) return;
           if (!isElementVisible(el)) return;
 
-          let filename = el.getAttribute('aria-label')?.replace(/Remove attachment/i, '').trim() ||
-                         el.querySelector('[data-testid="file-attachment-name"]')?.textContent?.trim();
+          let filename =
+            el.getAttribute('aria-label')?.replace(/Remove attachment/i, '').trim() ||
+            el.querySelector('[data-testid="file-attachment-name"]')?.textContent?.trim();
 
           if (filename) {
             results.push({

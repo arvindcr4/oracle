@@ -174,16 +174,33 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
 				if (!DOM) {
 					throw new Error("Chrome DOM domain unavailable while uploading attachments.");
 				}
+				// Upload attachments sequentially
 				for (const attachment of attachments) {
 					logger(`Uploading attachment: ${attachment.displayPath}`);
 					await uploadAttachmentFile({ runtime: Runtime, dom: DOM }, attachment, logger);
 				}
 				const waitBudget = Math.max(config.inputTimeoutMs ?? 30_000, 30_000);
-				await waitForAttachmentCompletion(Runtime, waitBudget, logger, {
-					page: Page,
-					userDataDir,
-				});
-				logger("All attachments uploaded");
+
+				// Best-effort wait for ChatGPT to finish processing uploads and re-enable the composer.
+				// In practice the page may refresh or temporarily disable the send button while uploads
+				// continue in the background, so we treat this as an optimization rather than a hard gate
+				// and fall back to visible-attachment checks when it flakes.
+				let initialWaitCompleted = false;
+				try {
+					await waitForAttachmentCompletion(Runtime, waitBudget, logger, {
+						page: Page,
+						userDataDir,
+					});
+					initialWaitCompleted = true;
+					logger("All attachments uploaded");
+				} catch (waitError) {
+					const message =
+						waitError instanceof Error ? waitError.message : String(waitError ?? "unknown error");
+					logger(
+						`Attachment readiness check hit an error (${message}). ` +
+							"Falling back to verifying visible attachments in the composer before submitting.",
+					);
+				}
 
 				// Verify attachments are visibly present in the composer before submitting
 				const normalizeFilename = (filename: string): string => {
@@ -251,13 +268,22 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
 					`✓ Verified ${visibleFilenames.length}/${expectedFilenames.length} attachment(s) visible in composer`,
 				);
 
-				// Double-check that the send button is enabled and attachments are ready
-				logger("Double-checking attachment readiness before submission...");
-				await waitForAttachmentCompletion(Runtime, 5000, logger, {
-					page: Page,
-					userDataDir,
-				});
-				logger("✓ Attachments confirmed ready; proceeding to submit");
+				// Double-check that the send button is enabled and attachments are ready.
+				// If the initial wait already failed, we skip this strict check to avoid
+				// treating minor UI reloads as fatal now that the attachments are visible.
+				if (initialWaitCompleted) {
+					logger("Double-checking attachment readiness before submission...");
+					await waitForAttachmentCompletion(Runtime, 5000, logger, {
+						page: Page,
+						userDataDir,
+					});
+					logger("✓ Attachments confirmed ready; proceeding to submit");
+				} else {
+					logger(
+						"Skipping final attachment readiness double-check due to earlier flakiness; " +
+							"attachments are visible, proceeding to submit.",
+					);
+				}
 			}
 			await submitPrompt({ runtime: Runtime, input: Input }, promptText, logger);
 
