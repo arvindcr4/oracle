@@ -8,6 +8,7 @@ import {
 } from '../constants.js';
 import { delay } from '../utils.js';
 import { logDomFailure } from '../domDebug.js';
+import { loadSessionState, navigateToSavedSession, getCurrentConversationUrl } from '../sessionRecovery.js';
 
 export async function uploadAttachmentFile(
   deps: { runtime: ChromeClient['Runtime']; dom?: ChromeClient['DOM'] },
@@ -46,6 +47,10 @@ export async function waitForAttachmentCompletion(
   Runtime: ChromeClient['Runtime'],
   timeoutMs: number,
   logger?: BrowserLogger,
+  recoveryOptions?: {
+    page: ChromeClient['Page'];
+    userDataDir: string;
+  },
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   let lastUrl: string | undefined;
@@ -73,7 +78,31 @@ export async function waitForAttachmentCompletion(
 
       // Detect page refresh/navigation
       if (lastUrl && value?.url && lastUrl !== value.url) {
-        logger?.('Page refreshed or navigated during attachment upload. Waiting for steady state...');
+        logger?.('Page refreshed or navigated during attachment upload.');
+
+        // Attempt to recover the session
+        if (recoveryOptions) {
+          const session = await loadSessionState(recoveryOptions.userDataDir);
+          if (session && session.url) {
+            logger?.(`Attempting to recover session from ${session.url}`);
+            const recovered = await navigateToSavedSession(
+              recoveryOptions.page,
+              Runtime,
+              session,
+              logger ?? (() => {}),
+            );
+
+            if (recovered) {
+              logger?.('Session recovered successfully. Waiting for page to stabilize...');
+              await delay(2000); // Give extra time after recovery
+              lastUrl = await getCurrentConversationUrl(Runtime);
+              continue;
+            } else {
+              logger?.('Session recovery failed. Continuing with current page...');
+            }
+          }
+        }
+
         await delay(1000); // Give page time to stabilize
         lastUrl = value.url;
         continue;

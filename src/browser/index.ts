@@ -20,6 +20,12 @@ import {
 import { navigateToGemini, ensureGeminiPromptReady, submitGeminiPrompt, waitForGeminiResponse } from '../gemini/actions.js';
 import { estimateTokenCount, withRetries } from './utils.js';
 import { formatElapsed } from '../oracle/format.js';
+import {
+  saveSessionState,
+  loadSessionState,
+  waitForConversationUrl,
+  navigateToSavedSession,
+} from './sessionRecovery.js';
 
 export type { BrowserAutomationConfig, BrowserRunOptions, BrowserRunResult } from './types.js';
 export { CHATGPT_URL, DEFAULT_MODEL_TARGET } from './constants.js';
@@ -152,10 +158,20 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
           await uploadAttachmentFile({ runtime: Runtime, dom: DOM }, attachment, logger);
         }
         const waitBudget = Math.max(config.inputTimeoutMs ?? 30_000, 30_000);
-        await waitForAttachmentCompletion(Runtime, waitBudget, logger);
+        await waitForAttachmentCompletion(Runtime, waitBudget, logger, {
+          page: Page,
+          userDataDir,
+        });
         logger('All attachments uploaded');
       }
       await submitPrompt({ runtime: Runtime, input: Input }, promptText, logger);
+
+      // Wait for and save the conversation URL
+      const conversationUrl = await waitForConversationUrl(Runtime, 5000, logger);
+      const attachmentPathsToSave = attachments.map((a) => a.path);
+      await saveSessionState(userDataDir, conversationUrl, promptText, attachmentPathsToSave);
+      logger(`Session state saved to ${userDataDir}`);
+
       stopThinkingMonitor = startThinkingStatusMonitor(Runtime, logger, options.verbose ?? false);
       const answer = await waitForAssistantResponse(Runtime, config.timeoutMs, logger);
       answerText = answer.text;
