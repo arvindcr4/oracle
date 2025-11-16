@@ -1,5 +1,5 @@
 {
-  "name": "@steipete/oracle",
+  "name": "arvindcr4-oracle",
   "version": "1.0.6",
   "description": "CLI wrapper around OpenAI Responses API with GPT-5 Pro and GPT-5.1 high reasoning modes.",
   "type": "module",
@@ -24,15 +24,15 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/steipete/oracle.git"
+    "url": "git+https://github.com/arvindcr4/oracle.git"
   },
   "keywords": [],
   "author": "",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/steipete/oracle/issues"
+    "url": "https://github.com/arvindcr4/oracle/issues"
   },
-  "homepage": "https://github.com/steipete/oracle#readme",
+  "homepage": "https://github.com/arvindcr4/oracle#readme",
   "dependencies": {
     "chalk": "^5.6.2",
     "chrome-cookies-secure": "^3.0.0",
