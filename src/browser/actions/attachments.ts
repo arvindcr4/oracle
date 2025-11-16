@@ -44,6 +44,11 @@ export async function uploadAttachmentFile(
 		await logDomFailure(runtime, logger, "file-upload");
 		throw new Error("Attachment did not register with the ChatGPT composer in time.");
 	}
+	
+	// Wait additional time for ChatGPT to process the file and display the attachment UI
+	// This addresses timing issues where the file is selected but not yet visually displayed
+	await delay(2000);
+	
 	logger(`Attachment queued: ${attachment.displayPath}`);
 }
 
@@ -54,7 +59,7 @@ export async function waitForAttachmentCompletion(
 	recoveryOptions?: {
 		page: ChromeClient["Page"];
 		userDataDir: string;
-	},
+	} | null,
 ): Promise<void> {
 	const deadline = Date.now() + timeoutMs;
 	let lastUrl: string | undefined;
@@ -204,6 +209,8 @@ export async function verifyAttachmentsVisible(
 	const timeout = options.timeout ?? 5000;
 	const pollInterval = options.pollInterval ?? 200;
 	const deadline = Date.now() + timeout;
+	let lastSnapshotKey: string | null = null;
+	let stableIterations = 0;
 
 	// Selectors that might contain attachment pills/badges in ChatGPT's composer
 	const ATTACHMENT_SELECTORS = [
@@ -218,6 +225,11 @@ export async function verifyAttachmentsVisible(
 		".attachment-pill",
 		".uploaded-file-chip",
 		".file-attachment",
+		// Additional selectors for newer ChatGPT UI versions
+		'[data-testid*="file-attachment"]',
+		'[data-testid*="file-upload"]',
+		'[role="button"][aria-label*="file"]',
+		'[role="button"][title*="file"]',
 	];
 
 	const expression = `(() => {
@@ -248,8 +260,8 @@ export async function verifyAttachmentsVisible(
           const ariaLabel = el.getAttribute('aria-label');
           if (ariaLabel) {
             filename = ariaLabel
-              .replace(/^(remove|delete|close)s+(attachment|file)s+/i, '')
-              .replace(/s+(attachment|file)$/i, '')
+              .replace(/^(remove|delete|close) +(attachment|file) +/i, '')
+              .replace(/ +(attachment|file)$/i, '')
               .trim();
           }
         }
@@ -278,12 +290,12 @@ export async function verifyAttachmentsVisible(
           }
         }
 
-        if (filename) {
-          // Normalize filename
-          filename = filename
+          if (filename) {
+            // Normalize filename
+            filename = filename
             .trim()
             .replace(/^["']|["']$/g, '') // Remove wrapping quotes
-            .replace(/s+/g, ' ') // Collapse whitespace
+            .replace(/[\t\n\r ]+/g, ' ') // Collapse common whitespace variants
             .trim();
 
           if (filename) {
@@ -306,11 +318,28 @@ export async function verifyAttachmentsVisible(
 			const attachments = result?.value as VisibleAttachment[] | undefined;
 
 			if (attachments && attachments.length > 0) {
-				logger?.(`verifyAttachmentsVisible: detected ${attachments.length} visible attachment(s)`);
-				attachments.forEach((att, idx) => {
-					logger?.(`  [${idx + 1}] ${att.filename} (matched: ${att.selector})`);
-				});
-				return attachments;
+				const snapshotKey = JSON.stringify(
+					attachments.map((att) => `${att.filename}::${att.selector}`),
+				);
+
+				if (snapshotKey === lastSnapshotKey) {
+					stableIterations += 1;
+				} else {
+					lastSnapshotKey = snapshotKey;
+					stableIterations = 0;
+				}
+
+				// Wait for a few consecutive identical snapshots so that
+				// multi-file uploads have time to settle before we report.
+				if (stableIterations >= 2) {
+					logger?.(
+						`verifyAttachmentsVisible: detected ${attachments.length} visible attachment(s)`,
+					);
+					attachments.forEach((att, idx) => {
+						logger?.(`  [${idx + 1}] ${att.filename} (matched: ${att.selector})`);
+					});
+					return attachments;
+				}
 			}
 		} catch (error) {
 			logger?.(

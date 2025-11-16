@@ -201,7 +201,7 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
 				);
 				const visibleAttachments = await verifyAttachmentsVisible(
 					Runtime,
-					{ timeout: 5000 },
+					{ timeout: 10000 },
 					logger,
 				);
 				const visibleFilenames = visibleAttachments.map((att) => normalizeFilename(att.filename));
@@ -248,8 +248,16 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
 				}
 
 				logger(
-					`✓ Verified ${visibleFilenames.length}/${expectedFilenames.length} attachment(s) visible in composer; proceeding to submit`,
+					`✓ Verified ${visibleFilenames.length}/${expectedFilenames.length} attachment(s) visible in composer`,
 				);
+
+				// Double-check that the send button is enabled and attachments are ready
+				logger("Double-checking attachment readiness before submission...");
+				await waitForAttachmentCompletion(Runtime, 5000, logger, {
+					page: Page,
+					userDataDir,
+				});
+				logger("✓ Attachments confirmed ready; proceeding to submit");
 			}
 			await submitPrompt({ runtime: Runtime, input: Input }, promptText, logger);
 
