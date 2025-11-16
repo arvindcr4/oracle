@@ -4,6 +4,7 @@ import {
   waitForAssistantResponse,
   uploadAttachmentFile,
   waitForAttachmentCompletion,
+  verifyAttachmentsVisible,
   navigateToChatGPT,
   ensurePromptReady,
   ensureNotBlocked,
@@ -199,10 +200,12 @@ describe('waitForAttachmentCompletion', () => {
       evaluate: vi
         .fn()
         .mockResolvedValueOnce({ result: { value: { state: 'disabled', uploading: true } } })
+        .mockResolvedValueOnce({ result: { value: { state: 'ready', uploading: false } } })
+        .mockResolvedValueOnce({ result: { value: { state: 'ready', uploading: false } } })
         .mockResolvedValueOnce({ result: { value: { state: 'ready', uploading: false } } }),
     } as unknown as ChromeClient['Runtime'];
     await expect(waitForAttachmentCompletion(runtime, 500)).resolves.toBeUndefined();
-    expect(runtime.evaluate).toHaveBeenCalledTimes(2);
+    expect(runtime.evaluate).toHaveBeenCalledTimes(4);
   });
 
   test('rejects when timeout reached', async () => {
@@ -210,5 +213,22 @@ describe('waitForAttachmentCompletion', () => {
       evaluate: vi.fn().mockResolvedValue({ result: { value: { state: 'disabled', uploading: true } } }),
     } as unknown as ChromeClient['Runtime'];
     await expect(waitForAttachmentCompletion(runtime, 200)).rejects.toThrow(/Attachments did not finish/);
+  });
+});
+
+describe('verifyAttachmentsVisible', () => {
+  test('waits for stable attachment snapshot before resolving', async () => {
+    const attachmentsPayload = [
+      { filename: 'foo.md', selector: '[data-testid="attachment-pill"]', outerHTML: '<div>foo.md</div>' },
+      { filename: 'bar.md', selector: '[data-testid="attachment-pill"]', outerHTML: '<div>bar.md</div>' },
+    ];
+
+    const runtime = {
+      evaluate: vi.fn().mockResolvedValue({ result: { value: attachmentsPayload } }),
+    } as unknown as ChromeClient['Runtime'];
+
+    const result = await verifyAttachmentsVisible(runtime, { timeout: 1000, pollInterval: 10 }, logger);
+    expect(result).toEqual(attachmentsPayload);
+    expect(runtime.evaluate).toHaveBeenCalled();
   });
 });
