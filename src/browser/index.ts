@@ -38,6 +38,7 @@ import type {
 	ChromeClient,
 } from "./types.js";
 import { estimateTokenCount, withRetries } from "./utils.js";
+import { acquireBrowserLock } from "./lock.js";
 
 export { CHATGPT_URL, DEFAULT_MODEL_TARGET } from "./constants.js";
 export type { BrowserAutomationConfig, BrowserRunOptions, BrowserRunResult } from "./types.js";
@@ -69,8 +70,11 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
 		);
 	}
 
+	let releaseBrowserLock: (() => Promise<void>) | null = null;
 	const userDataDir = await mkdtemp(path.join(os.tmpdir(), "oracle-browser-"));
 	logger(`Created temporary Chrome profile at ${userDataDir}`);
+
+	releaseBrowserLock = await acquireBrowserLock({ logger });
 
 	const chrome = await launchChrome(config, userDataDir, logger);
 	let removeTerminationHooks: (() => void) | null = null;
@@ -358,6 +362,11 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
 			},
 		);
 	} finally {
+		try {
+			await releaseBrowserLock?.();
+		} catch {
+			// ignore lock release failures
+		}
 		try {
 			if (!connectionClosedUnexpectedly) {
 				await client?.close();
