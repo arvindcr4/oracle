@@ -16,10 +16,12 @@ export function createDefaultClientFactory(): (apiKey: string) => ClientLike {
     });
     return {
       responses: {
+        // The OpenAI client has more detailed tool typings than Oracle models;
+        // cast here so OracleRequestBody can model only the subset we use.
         stream: (body: OracleRequestBody) =>
-          instance.responses.stream(body) as unknown as Promise<ResponseStreamLike>,
+          instance.responses.stream(body as any) as unknown as Promise<ResponseStreamLike>,
         create: (body: OracleRequestBody) =>
-          instance.responses.create(body) as unknown as Promise<OracleResponse>,
+          instance.responses.create(body as any) as unknown as Promise<OracleResponse>,
         retrieve: (id: string) => instance.responses.retrieve(id) as unknown as Promise<OracleResponse>,
       },
     };

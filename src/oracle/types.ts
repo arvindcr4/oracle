@@ -141,7 +141,10 @@ export interface BuildRequestBodyParams {
 }
 
 export interface ToolConfig {
-  type: 'web_search_preview';
+  // Narrow to the subset of the OpenAI tool union we actually use.
+  // The OpenAI client types allow `web_search_preview` (and its dated variants)
+  // plus `deep_research`; we model only the fields Oracle cares about.
+  type: 'web_search_preview' | 'deep_research' | 'web_search_preview_2025_03_11';
 }
 
 export interface OracleRequestBody {
