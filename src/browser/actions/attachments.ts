@@ -24,32 +24,69 @@ export async function uploadAttachmentFile(
 	if (!dom) {
 		throw new Error("DOM domain unavailable while uploading attachments.");
 	}
-	const documentNode = await dom.getDocument();
+
 	const selectors = [FILE_INPUT_SELECTOR, GENERIC_FILE_INPUT_SELECTOR];
-	let targetNodeId: number | undefined;
-	for (const selector of selectors) {
-		const result = await dom.querySelector({ nodeId: documentNode.root.nodeId, selector });
-		if (result.nodeId) {
-			targetNodeId = result.nodeId;
-			break;
+	const maxAttempts = 3;
+	const expectedName = path.basename(attachment.path);
+
+	let lastError: unknown;
+	for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+		const documentNode = await dom.getDocument();
+		let targetNodeId: number | undefined;
+		for (const selector of selectors) {
+			const result = await dom.querySelector({ nodeId: documentNode.root.nodeId, selector });
+			if (result.nodeId) {
+				targetNodeId = result.nodeId;
+				break;
+			}
+		}
+
+		if (!targetNodeId) {
+			lastError = new Error("Unable to locate ChatGPT file attachment input.");
+		} else {
+			try {
+				await dom.setFileInputFiles({ nodeId: targetNodeId, files: [attachment.path] });
+				const ready = await waitForAttachmentSelection(runtime, expectedName, 10_000);
+				if (ready) {
+					lastError = undefined;
+					break;
+				}
+				lastError = new Error(
+					"Attachment did not register with the ChatGPT composer in time (selection mismatch).",
+				);
+			} catch (error) {
+				lastError = error;
+				const message =
+					error instanceof Error ? error.message.toLowerCase() : String(error ?? "").toLowerCase();
+				if (message.includes("could not find node with given id") && attempt < maxAttempts) {
+					logger(
+						`Attachment input became stale while uploading (attempt ${attempt}); ` +
+							"retrying file input lookup...",
+					);
+				} else {
+					// Unexpected DevTools error; do not silently retry forever.
+					break;
+				}
+			}
+		}
+
+		if (attempt < maxAttempts) {
+			await delay(300 * attempt);
 		}
 	}
-	if (!targetNodeId) {
-		await logDomFailure(runtime, logger, "file-input");
-		throw new Error("Unable to locate ChatGPT file attachment input.");
-	}
-	await dom.setFileInputFiles({ nodeId: targetNodeId, files: [attachment.path] });
-	const expectedName = path.basename(attachment.path);
-	const ready = await waitForAttachmentSelection(runtime, expectedName, 10_000);
-	if (!ready) {
+
+	if (lastError) {
 		await logDomFailure(runtime, logger, "file-upload");
-		throw new Error("Attachment did not register with the ChatGPT composer in time.");
+		if (lastError instanceof Error) {
+			throw lastError;
+		}
+		throw new Error(String(lastError));
 	}
-	
+
 	// Wait additional time for ChatGPT to process the file and display the attachment UI
 	// This addresses timing issues where the file is selected but not yet visually displayed
 	await delay(2000);
-	
+
 	logger(`Attachment queued: ${attachment.displayPath}`);
 }
 

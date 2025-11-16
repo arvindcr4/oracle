@@ -174,6 +174,36 @@ describe('uploadAttachmentFile', () => {
     expect(logger).toHaveBeenCalledWith(expect.stringContaining('Attachment queued'));
   });
 
+  test('retries when attachment input node becomes stale', async () => {
+    logger.mockClear();
+    let calls = 0;
+    const dom = {
+      getDocument: vi.fn().mockResolvedValue({ root: { nodeId: 1 } }),
+      querySelector: vi.fn().mockResolvedValue({ nodeId: 2 }),
+      setFileInputFiles: vi.fn().mockImplementation(async () => {
+        calls += 1;
+        if (calls === 1) {
+          throw new Error('Could not find node with given id');
+        }
+      }),
+    } as unknown as ChromeClient['DOM'];
+    const runtime = {
+      evaluate: vi.fn().mockResolvedValue({ result: { value: { matched: true } } }),
+    } as unknown as ChromeClient['Runtime'];
+
+    await expect(
+      uploadAttachmentFile(
+        { runtime, dom },
+        { path: '/tmp/foo.md', displayPath: 'foo.md' },
+        logger,
+      ),
+    ).resolves.toBeUndefined();
+    expect(dom.setFileInputFiles).toHaveBeenCalledTimes(2);
+    expect(logger).toHaveBeenCalledWith(
+      expect.stringContaining('Attachment input became stale while uploading'),
+    );
+  });
+
   test('throws when file input missing', async () => {
     const dom = {
       getDocument: vi.fn().mockResolvedValue({ root: { nodeId: 1 } }),
