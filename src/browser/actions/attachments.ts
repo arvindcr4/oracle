@@ -1,61 +1,65 @@
-import path from 'node:path';
-import type { ChromeClient, BrowserAttachment, BrowserLogger } from '../types.js';
+import path from "node:path";
 import {
-  FILE_INPUT_SELECTOR,
-  GENERIC_FILE_INPUT_SELECTOR,
-  SEND_BUTTON_SELECTOR,
-  UPLOAD_STATUS_SELECTORS,
-} from '../constants.js';
-import { delay } from '../utils.js';
-import { logDomFailure } from '../domDebug.js';
-import { loadSessionState, navigateToSavedSession, getCurrentConversationUrl } from '../sessionRecovery.js';
+	FILE_INPUT_SELECTOR,
+	GENERIC_FILE_INPUT_SELECTOR,
+	SEND_BUTTON_SELECTOR,
+	UPLOAD_STATUS_SELECTORS,
+} from "../constants.js";
+import { logDomFailure } from "../domDebug.js";
+import {
+	getCurrentConversationUrl,
+	loadSessionState,
+	navigateToSavedSession,
+} from "../sessionRecovery.js";
+import type { BrowserAttachment, BrowserLogger, ChromeClient } from "../types.js";
+import { delay } from "../utils.js";
 
 export async function uploadAttachmentFile(
-  deps: { runtime: ChromeClient['Runtime']; dom?: ChromeClient['DOM'] },
-  attachment: BrowserAttachment,
-  logger: BrowserLogger,
+	deps: { runtime: ChromeClient["Runtime"]; dom?: ChromeClient["DOM"] },
+	attachment: BrowserAttachment,
+	logger: BrowserLogger,
 ) {
-  const { runtime, dom } = deps;
-  if (!dom) {
-    throw new Error('DOM domain unavailable while uploading attachments.');
-  }
-  const documentNode = await dom.getDocument();
-  const selectors = [FILE_INPUT_SELECTOR, GENERIC_FILE_INPUT_SELECTOR];
-  let targetNodeId: number | undefined;
-  for (const selector of selectors) {
-    const result = await dom.querySelector({ nodeId: documentNode.root.nodeId, selector });
-    if (result.nodeId) {
-      targetNodeId = result.nodeId;
-      break;
-    }
-  }
-  if (!targetNodeId) {
-    await logDomFailure(runtime, logger, 'file-input');
-    throw new Error('Unable to locate ChatGPT file attachment input.');
-  }
-  await dom.setFileInputFiles({ nodeId: targetNodeId, files: [attachment.path] });
-  const expectedName = path.basename(attachment.path);
-  const ready = await waitForAttachmentSelection(runtime, expectedName, 10_000);
-  if (!ready) {
-    await logDomFailure(runtime, logger, 'file-upload');
-    throw new Error('Attachment did not register with the ChatGPT composer in time.');
-  }
-  logger(`Attachment queued: ${attachment.displayPath}`);
+	const { runtime, dom } = deps;
+	if (!dom) {
+		throw new Error("DOM domain unavailable while uploading attachments.");
+	}
+	const documentNode = await dom.getDocument();
+	const selectors = [FILE_INPUT_SELECTOR, GENERIC_FILE_INPUT_SELECTOR];
+	let targetNodeId: number | undefined;
+	for (const selector of selectors) {
+		const result = await dom.querySelector({ nodeId: documentNode.root.nodeId, selector });
+		if (result.nodeId) {
+			targetNodeId = result.nodeId;
+			break;
+		}
+	}
+	if (!targetNodeId) {
+		await logDomFailure(runtime, logger, "file-input");
+		throw new Error("Unable to locate ChatGPT file attachment input.");
+	}
+	await dom.setFileInputFiles({ nodeId: targetNodeId, files: [attachment.path] });
+	const expectedName = path.basename(attachment.path);
+	const ready = await waitForAttachmentSelection(runtime, expectedName, 10_000);
+	if (!ready) {
+		await logDomFailure(runtime, logger, "file-upload");
+		throw new Error("Attachment did not register with the ChatGPT composer in time.");
+	}
+	logger(`Attachment queued: ${attachment.displayPath}`);
 }
 
 export async function waitForAttachmentCompletion(
-  Runtime: ChromeClient['Runtime'],
-  timeoutMs: number,
-  logger?: BrowserLogger,
-  recoveryOptions?: {
-    page: ChromeClient['Page'];
-    userDataDir: string;
-  },
+	Runtime: ChromeClient["Runtime"],
+	timeoutMs: number,
+	logger?: BrowserLogger,
+	recoveryOptions?: {
+		page: ChromeClient["Page"];
+		userDataDir: string;
+	},
 ): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  let lastUrl: string | undefined;
+	const deadline = Date.now() + timeoutMs;
+	let lastUrl: string | undefined;
 
-  const expression = `(() => {
+	const expression = `(() => {
     const button = document.querySelector('${SEND_BUTTON_SELECTOR}');
     if (!button) {
       return { state: 'missing', uploading: false, url: window.location.href };
@@ -71,79 +75,93 @@ export async function waitForAttachmentCompletion(
     return { state: disabled ? 'disabled' : 'ready', uploading, url: window.location.href };
   })()`;
 
-  while (Date.now() < deadline) {
-    try {
-      const { result } = await Runtime.evaluate({ expression, returnByValue: true });
-      const value = result?.value as { state?: string; uploading?: boolean; url?: string } | undefined;
+	while (Date.now() < deadline) {
+		try {
+			const { result } = await Runtime.evaluate({ expression, returnByValue: true });
+			const value = result?.value as
+				| { state?: string; uploading?: boolean; url?: string }
+				| undefined;
 
-      // Detect page refresh/navigation
-      if (lastUrl && value?.url && lastUrl !== value.url) {
-        logger?.('Page refreshed or navigated during attachment upload.');
+			// Detect page refresh/navigation
+			if (lastUrl && value?.url && lastUrl !== value.url) {
+				logger?.("Page refreshed or navigated during attachment upload.");
 
-        // Attempt to recover the session
-        if (recoveryOptions) {
-          const session = await loadSessionState(recoveryOptions.userDataDir);
-          if (session && session.url) {
-            logger?.(`Attempting to recover session from ${session.url}`);
-            const recovered = await navigateToSavedSession(
-              recoveryOptions.page,
-              Runtime,
-              session,
-              logger ?? (() => {}),
-            );
+				// Attempt to recover the session
+				if (recoveryOptions) {
+					const session = await loadSessionState(recoveryOptions.userDataDir);
+					if (session?.url) {
+						logger?.(`Attempting to recover session from ${session.url}`);
+						const recovered = await navigateToSavedSession(
+							recoveryOptions.page,
+							Runtime,
+							session,
+							logger ?? (() => {}),
+						);
 
-            if (recovered) {
-              logger?.('Session recovered successfully. Waiting for page to stabilize...');
-              await delay(2000); // Give extra time after recovery
-              lastUrl = await getCurrentConversationUrl(Runtime);
-              continue;
-            } else {
-              logger?.('Session recovery failed. Continuing with current page...');
-            }
-          }
-        }
+						if (recovered) {
+							logger?.("Session recovered successfully. Waiting for page to stabilize...");
+							await delay(2000); // Give extra time after recovery
+							lastUrl = await getCurrentConversationUrl(Runtime);
+							continue;
+						} else {
+							logger?.("Session recovery failed. Continuing with current page...");
+						}
+					}
+				}
 
-        await delay(1000); // Give page time to stabilize
-        lastUrl = value.url;
-        continue;
-      }
+				await delay(1000); // Give page time to stabilize
+				lastUrl = value.url;
+				continue;
+			}
 
-      if (!lastUrl && value?.url) {
-        lastUrl = value.url;
-      }
+			if (!lastUrl && value?.url) {
+				lastUrl = value.url;
+			}
 
-      if (value && value.state === 'ready' && !value.uploading) {
-        // Double-check after a brief delay to ensure steady state
-        await delay(500);
-        const { result: confirmResult } = await Runtime.evaluate({ expression, returnByValue: true });
-        const confirmValue = confirmResult?.value as { state?: string; uploading?: boolean; url?: string } | undefined;
+			if (value && value.state === "ready" && !value.uploading) {
+				// Double-check after a brief delay to ensure steady state
+				await delay(500);
+				const { result: confirmResult } = await Runtime.evaluate({
+					expression,
+					returnByValue: true,
+				});
+				const confirmValue = confirmResult?.value as
+					| { state?: string; uploading?: boolean; url?: string }
+					| undefined;
 
-        if (confirmValue && confirmValue.state === 'ready' && !confirmValue.uploading && confirmValue.url === lastUrl) {
-          logger?.('Attachments uploaded successfully and page is in steady state');
-          return;
-        }
-      }
-    } catch (error) {
-      // Handle potential websocket or evaluation errors during refresh
-      logger?.(`Error during attachment wait: ${error instanceof Error ? error.message : String(error)}`);
-      await delay(500);
-    }
+				if (
+					confirmValue &&
+					confirmValue.state === "ready" &&
+					!confirmValue.uploading &&
+					confirmValue.url === lastUrl
+				) {
+					logger?.("Attachments uploaded successfully and page is in steady state");
+					return;
+				}
+			}
+		} catch (error) {
+			// Handle potential websocket or evaluation errors during refresh
+			logger?.(
+				`Error during attachment wait: ${error instanceof Error ? error.message : String(error)}`,
+			);
+			await delay(500);
+		}
 
-    await delay(250);
-  }
+		await delay(250);
+	}
 
-  logger?.('Attachment upload timed out while waiting for ChatGPT composer to become ready.');
-  await logDomFailure(Runtime, logger ?? (() => {}), 'file-upload-timeout');
-  throw new Error('Attachments did not finish uploading before timeout.');
+	logger?.("Attachment upload timed out while waiting for ChatGPT composer to become ready.");
+	await logDomFailure(Runtime, logger ?? (() => {}), "file-upload-timeout");
+	throw new Error("Attachments did not finish uploading before timeout.");
 }
 
 async function waitForAttachmentSelection(
-  Runtime: ChromeClient['Runtime'],
-  expectedName: string,
-  timeoutMs: number,
+	Runtime: ChromeClient["Runtime"],
+	expectedName: string,
+	timeoutMs: number,
 ): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-  const expression = `(() => {
+	const deadline = Date.now() + timeoutMs;
+	const expression = `(() => {
     const selector = ${JSON.stringify(GENERIC_FILE_INPUT_SELECTOR)};
     const input = document.querySelector(selector);
     if (!input || !input.files) {
@@ -152,14 +170,158 @@ async function waitForAttachmentSelection(
     const names = Array.from(input.files).map((file) => file?.name ?? '');
     return { matched: names.some((name) => name === ${JSON.stringify(expectedName)}), names };
   })()`;
-  while (Date.now() < deadline) {
-    const { result } = await Runtime.evaluate({ expression, returnByValue: true });
-    const matched = Boolean(result?.value?.matched);
-    if (matched) {
-      return true;
-    }
-    await delay(150);
-  }
-  return false;
+	while (Date.now() < deadline) {
+		const { result } = await Runtime.evaluate({ expression, returnByValue: true });
+		const matched = Boolean(result?.value?.matched);
+		if (matched) {
+			return true;
+		}
+		await delay(150);
+	}
+	return false;
 }
 
+export interface VisibleAttachment {
+	filename: string;
+	selector: string;
+	outerHTML?: string;
+}
+
+export interface VerifyAttachmentsOptions {
+	timeout?: number;
+	pollInterval?: number;
+}
+
+/**
+ * Verifies that attachments are visibly present in the ChatGPT composer DOM.
+ * Returns the list of visible attachments found by querying various selectors.
+ */
+export async function verifyAttachmentsVisible(
+	Runtime: ChromeClient["Runtime"],
+	options: VerifyAttachmentsOptions = {},
+	logger?: BrowserLogger,
+): Promise<VisibleAttachment[]> {
+	const timeout = options.timeout ?? 5000;
+	const pollInterval = options.pollInterval ?? 200;
+	const deadline = Date.now() + timeout;
+
+	// Selectors that might contain attachment pills/badges in ChatGPT's composer
+	const ATTACHMENT_SELECTORS = [
+		'[data-testid*="attachment-pill"]',
+		'[data-testid*="attachment"]',
+		'[data-testid*="file-preview"]',
+		'[aria-label*="attachment"]',
+		'button[aria-label*="Remove attachment"]',
+		'button[aria-label*="remove file"]',
+		'[class*="attachment"]',
+		'[class*="Attachment"]',
+		".attachment-pill",
+		".uploaded-file-chip",
+		".file-attachment",
+	];
+
+	const expression = `(() => {
+    const selectors = ${JSON.stringify(ATTACHMENT_SELECTORS)};
+    const results = [];
+
+    for (const selector of selectors) {
+      const elements = document.querySelectorAll(selector);
+      for (const el of elements) {
+        // Check if element is visible
+        if (!el.offsetParent && el !== document.body) continue;
+        const style = window.getComputedStyle(el);
+        if (style.visibility === 'hidden' || style.display === 'none') continue;
+
+        // Extract filename heuristically
+        let filename = null;
+        
+        // Try data attributes
+        filename = el.getAttribute('data-filename') || el.getAttribute('data-file-name');
+        
+        // Try title attribute
+        if (!filename) {
+          filename = el.getAttribute('title');
+        }
+        
+        // Try aria-label (strip common prefixes like "Remove attachment ")
+        if (!filename) {
+          const ariaLabel = el.getAttribute('aria-label');
+          if (ariaLabel) {
+            filename = ariaLabel
+              .replace(/^(remove|delete|close)s+(attachment|file)s+/i, '')
+              .replace(/s+(attachment|file)$/i, '')
+              .trim();
+          }
+        }
+        
+        // Try text content from specific child elements
+        if (!filename) {
+          const filenameSpan = el.querySelector('[class*="filename"], [data-testid*="filename"]');
+          if (filenameSpan && filenameSpan.textContent) {
+            filename = filenameSpan.textContent.trim();
+          }
+        }
+        
+        // Try direct text content (but filter out button labels)
+        if (!filename) {
+          const text = el.textContent?.trim() ?? '';
+          if (text && text.length > 0 && text.length < 200 && !text.match(/^(remove|delete|close|upload)$/i)) {
+            filename = text;
+          }
+        }
+        
+        // Try image alt text
+        if (!filename) {
+          const img = el.querySelector('img[alt]');
+          if (img) {
+            filename = img.getAttribute('alt');
+          }
+        }
+
+        if (filename) {
+          // Normalize filename
+          filename = filename
+            .trim()
+            .replace(/^["']|["']$/g, '') // Remove wrapping quotes
+            .replace(/s+/g, ' ') // Collapse whitespace
+            .trim();
+
+          if (filename) {
+            results.push({
+              filename,
+              selector,
+              outerHTML: el.outerHTML?.substring(0, 512) ?? '',
+            });
+          }
+        }
+      }
+    }
+
+    return results;
+  })()`;
+
+	while (Date.now() < deadline) {
+		try {
+			const { result } = await Runtime.evaluate({ expression, returnByValue: true });
+			const attachments = result?.value as VisibleAttachment[] | undefined;
+
+			if (attachments && attachments.length > 0) {
+				logger?.(`verifyAttachmentsVisible: detected ${attachments.length} visible attachment(s)`);
+				attachments.forEach((att, idx) => {
+					logger?.(`  [${idx + 1}] ${att.filename} (matched: ${att.selector})`);
+				});
+				return attachments;
+			}
+		} catch (error) {
+			logger?.(
+				`verifyAttachmentsVisible error: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
+
+		await delay(pollInterval);
+	}
+
+	// Timeout reached - return whatever we have (likely empty)
+	logger?.("verifyAttachmentsVisible: timeout reached, no attachments detected");
+	return [];
+}

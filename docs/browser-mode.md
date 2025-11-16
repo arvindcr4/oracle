@@ -30,7 +30,7 @@ All options are persisted with the session so reruns (`oracle exec <id>`) reuse 
 
 ## Limitations / Follow-Up Plan
 
-- **Attachment lifecycle** – every `--file` path is uploaded separately so ChatGPT can ingest the original filenames/content. The automation waits for the uploads to finish (send button enabled, no upload indicators) before hitting submit. Follow-up work: expose upload status in session logs. When upload automation flakes, use `--browser-inline-files` to fall back to pasting file contents directly.
+- **Attachment lifecycle** – every `--file` path is uploaded separately so ChatGPT can ingest the original filenames/content. The automation waits for the uploads to finish (send button enabled, no upload indicators), then **verifies that all expected attachments are visibly present in the composer DOM** before hitting submit. If the verification fails (e.g., attachment count mismatch), the run aborts with a detailed error showing which files are missing. When upload automation flakes, use `--browser-inline-files` to fall back to pasting file contents directly.
 - **Model picker drift** – we currently rely on heuristics to pick GPT-5.1/GPT-5 Pro. If OpenAI changes the DOM we need to refresh the selectors quickly. Consider snapshot tests or a small “self check” command.
 - **Non-mac platforms** – window hiding uses AppleScript today; Linux/Windows just ignore the flag. We should detect platforms explicitly and document the behavior.
 - **Streaming UX** – browser runs cannot stream tokens, so we log a warning before launching Chrome. Investigate whether we can stream clipboard deltas via mutation observers for a closer UX.
