@@ -140,8 +140,25 @@ export async function waitForAttachmentCompletion(
 					!confirmValue.uploading &&
 					confirmValue.url === lastUrl
 				) {
-					logger?.("Attachments uploaded successfully and page is in steady state");
-					return;
+					// Triple-check that attachments are truly ready by verifying the DOM state
+					await delay(1000); // Give extra time for any async operations
+					const { result: finalCheck } = await Runtime.evaluate({
+						expression,
+						returnByValue: true,
+					});
+					const finalValue = finalCheck?.value as
+						| { state?: string; uploading?: boolean; url?: string }
+						| undefined;
+
+					if (
+						finalValue &&
+						finalValue.state === "ready" &&
+						!finalValue.uploading &&
+						finalValue.url === lastUrl
+					) {
+						logger?.("Attachments uploaded successfully and confirmed in steady state");
+						return;
+					}
 				}
 			}
 		} catch (error) {
