@@ -16,6 +16,12 @@ export async function submitPrompt(
 ) {
   const { runtime, input } = deps;
   const encodedPrompt = JSON.stringify(prompt);
+
+  // Capture the current number of conversation turns so we can later
+  // detect that a *new* user message was added instead of accidentally
+  // matching an older turn with similar text when verifying commit.
+  const baselineTurns = await getConversationTurnCount(runtime);
+
   const focusResult = await runtime.evaluate({
     expression: `(() => {
       const SELECTORS = ${JSON.stringify(INPUT_SELECTORS)};
@@ -120,7 +126,7 @@ export async function submitPrompt(
     logger('Clicked send button');
   }
 
-  await verifyPromptCommitted(runtime, prompt, 30_000, logger);
+  await verifyPromptCommitted(runtime, prompt, 30_000, logger, baselineTurns);
 }
 
 async function attemptSendButton(Runtime: ChromeClient['Runtime']): Promise<boolean> {
@@ -157,11 +163,13 @@ async function verifyPromptCommitted(
   prompt: string,
   timeoutMs: number,
   logger?: BrowserLogger,
+  baselineTurns = 0,
 ) {
   const deadline = Date.now() + timeoutMs;
   const encodedPrompt = JSON.stringify(prompt.trim());
   const primarySelectorLiteral = JSON.stringify(PROMPT_PRIMARY_SELECTOR);
   const fallbackSelectorLiteral = JSON.stringify(PROMPT_FALLBACK_SELECTOR);
+  const baselineLiteral = Number.isFinite(baselineTurns) && baselineTurns > 0 ? baselineTurns : 0;
   const script = `(() => {
     const editor = document.querySelector(${primarySelectorLiteral});
     const fallback = document.querySelector(${fallbackSelectorLiteral});
@@ -169,7 +177,13 @@ async function verifyPromptCommitted(
     const normalizedPrompt = normalize(${encodedPrompt});
     const CONVERSATION_SELECTOR = ${JSON.stringify(CONVERSATION_TURN_SELECTOR)};
     const articles = Array.from(document.querySelectorAll(CONVERSATION_SELECTOR));
-    const userMatched = articles.some((node) => normalize(node?.innerText).includes(normalizedPrompt));
+    const BASELINE_TURNS = ${baselineLiteral};
+    const userMatched = articles.some((node, index) => {
+      if (index < BASELINE_TURNS) {
+        return false;
+      }
+      return normalize(node?.innerText).includes(normalizedPrompt);
+    });
     return {
       userMatched,
       fallbackValue: fallback?.value ?? '',
@@ -191,3 +205,18 @@ async function verifyPromptCommitted(
   throw new Error('Prompt did not appear in conversation before timeout (send may have failed)');
 }
 
+async function getConversationTurnCount(Runtime: ChromeClient['Runtime']): Promise<number> {
+  try {
+    const { result } = await Runtime.evaluate({
+      expression: `(() => {
+        const CONVERSATION_SELECTOR = ${JSON.stringify(CONVERSATION_TURN_SELECTOR)};
+        return Array.from(document.querySelectorAll(CONVERSATION_SELECTOR)).length;
+      })()`,
+      returnByValue: true,
+    });
+    const value = Number(result?.value);
+    return Number.isFinite(value) && value >= 0 ? value : 0;
+  } catch {
+    return 0;
+  }
+}
