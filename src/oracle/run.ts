@@ -31,6 +31,7 @@ import { createDefaultClientFactory } from './client.js';
 import { startHeartbeat } from '../heartbeat.js';
 import { getCliVersion } from '../version.js';
 import { createFsAdapter } from './fsAdapter.js';
+import { storeResponseId, updateResponseStatus } from './responseStore.js';
 const isTty = process.stdout.isTTY;
 const dim = (text: string): string => (isTty ? kleur.dim(text) : text);
 const BACKGROUND_MAX_WAIT_MS = 30 * 60 * 1000;
@@ -392,6 +393,14 @@ async function executeBackgroundResponse(params: BackgroundExecutionParams): Pro
     throw new OracleResponseError('OpenAI did not return a response ID for the background run.', initialResponse);
   }
   const responseId = initialResponse.id;
+
+  // Store response ID for later retrieval
+  const model = requestBody.model || 'unknown';
+  const promptPreview = requestBody.input?.[0]?.content?.[0]?.text?.slice(0, 100) || 'No prompt available';
+  await storeResponseId(responseId, model, promptPreview, initialResponse.status).catch((error) => {
+    log(dim(`Warning: Could not store response ID: ${error instanceof Error ? error.message : String(error)}`));
+  });
+
   log(
     dim(
       `OpenAI scheduled background response ${responseId} (status=${initialResponse.status ?? 'unknown'}). Monitoring up to ${Math.round(
@@ -463,6 +472,11 @@ async function pollBackgroundResponse(params: BackgroundPollParams): Promise<Ora
       log(dim(`OpenAI background response status=${status}.`));
     }
     lastStatus = status;
+
+    // Update stored status
+    await updateResponseStatus(responseId, status).catch(() => {
+      // Silently ignore storage errors
+    });
 
     if (status === 'completed') {
       return response;

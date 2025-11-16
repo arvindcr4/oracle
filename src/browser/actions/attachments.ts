@@ -48,10 +48,12 @@ export async function waitForAttachmentCompletion(
   logger?: BrowserLogger,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
+  let lastUrl: string | undefined;
+
   const expression = `(() => {
     const button = document.querySelector('${SEND_BUTTON_SELECTOR}');
     if (!button) {
-      return { state: 'missing', uploading: false };
+      return { state: 'missing', uploading: false, url: window.location.href };
     }
     const disabled = button.hasAttribute('disabled') || button.getAttribute('aria-disabled') === 'true';
     const uploadingSelectors = ${JSON.stringify(UPLOAD_STATUS_SELECTORS)};
@@ -61,16 +63,46 @@ export async function waitForAttachmentCompletion(
         return text.includes('upload') || text.includes('processing');
       });
     });
-    return { state: disabled ? 'disabled' : 'ready', uploading };
+    return { state: disabled ? 'disabled' : 'ready', uploading, url: window.location.href };
   })()`;
+
   while (Date.now() < deadline) {
-    const { result } = await Runtime.evaluate({ expression, returnByValue: true });
-    const value = result?.value as { state?: string; uploading?: boolean } | undefined;
-    if (value && value.state === 'ready' && !value.uploading) {
-      return;
+    try {
+      const { result } = await Runtime.evaluate({ expression, returnByValue: true });
+      const value = result?.value as { state?: string; uploading?: boolean; url?: string } | undefined;
+
+      // Detect page refresh/navigation
+      if (lastUrl && value?.url && lastUrl !== value.url) {
+        logger?.('Page refreshed or navigated during attachment upload. Waiting for steady state...');
+        await delay(1000); // Give page time to stabilize
+        lastUrl = value.url;
+        continue;
+      }
+
+      if (!lastUrl && value?.url) {
+        lastUrl = value.url;
+      }
+
+      if (value && value.state === 'ready' && !value.uploading) {
+        // Double-check after a brief delay to ensure steady state
+        await delay(500);
+        const { result: confirmResult } = await Runtime.evaluate({ expression, returnByValue: true });
+        const confirmValue = confirmResult?.value as { state?: string; uploading?: boolean; url?: string } | undefined;
+
+        if (confirmValue && confirmValue.state === 'ready' && !confirmValue.uploading && confirmValue.url === lastUrl) {
+          logger?.('Attachments uploaded successfully and page is in steady state');
+          return;
+        }
+      }
+    } catch (error) {
+      // Handle potential websocket or evaluation errors during refresh
+      logger?.(`Error during attachment wait: ${error instanceof Error ? error.message : String(error)}`);
+      await delay(500);
     }
+
     await delay(250);
   }
+
   logger?.('Attachment upload timed out while waiting for ChatGPT composer to become ready.');
   await logDomFailure(Runtime, logger ?? (() => {}), 'file-upload-timeout');
   throw new Error('Attachments did not finish uploading before timeout.');

@@ -256,6 +256,24 @@ const statusCommand = program
     });
   });
 
+const retrieveCommand = program
+  .command('retrieve')
+  .description('Retrieve and display stored oracle background responses.')
+  .option('--response-id <id>', 'Response ID to retrieve')
+  .option('--list', 'List all stored responses', false)
+  .option('--api-key <key>', 'OpenAI API key (defaults to OPENAI_API_KEY env var)')
+  .option('-v, --verbose', 'Show detailed usage information', false)
+  .action(async (_options, command: Command) => {
+    const { retrieveResponse } = await import('../src/cli/retrieveResponse.js');
+    const opts = command.opts();
+    await retrieveResponse({
+      responseId: opts.responseId,
+      list: opts.list,
+      apiKey: opts.apiKey,
+      verbose: opts.verbose,
+    });
+  });
+
 function buildRunOptions(options: ResolvedCliOptions, overrides: Partial<RunOracleOptions> = {}): RunOracleOptions {
   if (!options.prompt) {
     throw new Error('Prompt is required.');
