@@ -5,6 +5,7 @@ import type {
   MinimalFsModule,
   OracleRequestBody,
   RunOracleOptions,
+  ToolConfig,
 } from './types.js';
 import { DEFAULT_SYSTEM_PROMPT } from './config.js';
 import { createFileSections, readFiles } from './files.js';
@@ -29,14 +30,17 @@ export function buildRequestBody({
   background,
   storeResponse,
 }: BuildRequestBodyParams): OracleRequestBody {
-  // Modify system prompt if deep research is enabled
-  const finalSystemPrompt = deepResearchEnabled
-    ? `${systemPrompt}\n\nENABLE DEEP RESEARCH MODE: Perform comprehensive research using advanced search capabilities. Explore multiple sources, synthesize information thoroughly, and provide detailed analysis with citations.`
-    : systemPrompt;
+  const tools: ToolConfig[] = [];
+  if (searchEnabled) {
+    tools.push({ type: 'web_search_preview' });
+  }
+  if (deepResearchEnabled) {
+    tools.push({ type: 'deep_research' });
+  }
 
   return {
     model: modelConfig.model,
-    instructions: finalSystemPrompt,
+    instructions: systemPrompt,
     input: [
       {
         role: 'user',
@@ -48,7 +52,7 @@ export function buildRequestBody({
         ],
       },
     ],
-    tools: searchEnabled ? [{ type: 'web_search_preview' }] : undefined,
+    tools: tools.length > 0 ? tools : undefined,
     reasoning: modelConfig.reasoning || undefined,
     max_output_tokens: maxOutputTokens,
     background: background ? true : undefined,

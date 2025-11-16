@@ -9,7 +9,7 @@ export const DEFAULT_BROWSER_CONFIG: ResolvedBrowserConfig = {
   inputTimeoutMs: 30_000,
   cookieSync: true,
   headless: false,
-  keepBrowser: false,
+  keepBrowser: true,
   hideWindow: false,
   desiredModel: DEFAULT_MODEL_TARGET,
   debug: false,

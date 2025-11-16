@@ -68,7 +68,7 @@ function renderHelpFooter(program: Command, colors: HelpColors): string {
   const tips = [
     `${colors.bullet('•')} Attach source files for best results, but keep total input under ~196k tokens.`,
     `${colors.bullet('•')} The model has no built-in knowledge of your project—open with the architecture, key components, and why you’re asking.`,
-    `${colors.bullet('•')} Run ${colors.accent('--files-report')} to inspect token spend before hitting the API.`,
+    `${colors.bullet('•')} Run ${colors.accent('--files-report')} to inspect token spend before hitting the API; enable deep research via ${colors.accent('--deep-research on')} for tougher questions.`,
     `${colors.bullet('•')} Non-preview runs spawn detached sessions so they keep streaming even if your terminal closes — reattach anytime via ${colors.accent('pnpm oracle session <slug>')}.`,
     `${colors.bullet('•')} Set a memorable 3–5 word slug via ${colors.accent('--slug "<words>"')} to keep session IDs tidy.`,
     `${colors.bullet('•')} Finished sessions auto-hide preamble logs when reattached; raw timestamps remain in the saved log file.`,
