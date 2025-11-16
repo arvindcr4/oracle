@@ -24,6 +24,7 @@ import {
   parseFloatOption,
   parseIntOption,
   parseSearchOption,
+  parseDeepResearchOption,
   usesDefaultStatusFilters,
   resolvePreviewMode,
   normalizeModelOption,
@@ -52,6 +53,7 @@ interface CliOptions extends OptionValues {
   system?: string;
   silent?: boolean;
   search?: boolean;
+  deepResearch?: boolean;
   preview?: boolean | string;
   previewMode?: PreviewMode;
   apiKey?: string;
@@ -147,6 +149,11 @@ program
   .addOption(
     new Option('--search <mode>', 'Set server-side search behavior (on/off).')
       .argParser(parseSearchOption)
+      .hideHelp(),
+  )
+  .addOption(
+    new Option('--deep-research <mode>', 'Enable ChatGPT deep research mode (on/off).')
+      .argParser(parseDeepResearchOption)
       .hideHelp(),
   )
   .addOption(
@@ -263,6 +270,7 @@ function buildRunOptions(options: ResolvedCliOptions, overrides: Partial<RunOrac
     system: overrides.system ?? options.system,
     silent: overrides.silent ?? options.silent,
     search: overrides.search ?? options.search,
+    deepResearch: overrides.deepResearch ?? options.deepResearch,
     preview: overrides.preview ?? undefined,
     previewMode: overrides.previewMode ?? options.previewMode,
     apiKey: overrides.apiKey ?? options.apiKey,
@@ -294,6 +302,7 @@ function buildRunOptionsFromMetadata(metadata: SessionMetadata): RunOracleOption
     system: stored.system,
     silent: stored.silent,
     search: undefined,
+    deepResearch: undefined,
     preview: false,
     previewMode: undefined,
     apiKey: undefined,
@@ -556,6 +565,7 @@ function printDebugHelp(cliName: string): void {
   console.log(chalk.bold('Advanced Options'));
   printDebugOptionGroup([
     ['--search <on|off>', 'Enable or disable the server-side search tool (default on).'],
+    ['--deep-research <on|off>', 'Enable or disable ChatGPT deep research mode (default off).'],
     ['--max-input <tokens>', 'Override the input token budget.'],
     ['--max-output <tokens>', 'Override the max output tokens (model default otherwise).'],
   ]);

@@ -691,6 +691,7 @@ describe('oracle utility helpers', () => {
       systemPrompt: 'sys',
       userPrompt: 'user',
       searchEnabled: false,
+      deepResearchEnabled: false,
       maxOutputTokens: 222,
     });
     expect(base.tools).toBeUndefined();
@@ -701,6 +702,7 @@ describe('oracle utility helpers', () => {
       systemPrompt: 'sys',
       userPrompt: 'user',
       searchEnabled: true,
+      deepResearchEnabled: false,
       maxOutputTokens: undefined,
     });
     expect(withSearch.tools).toEqual([{ type: 'web_search_preview' }]);

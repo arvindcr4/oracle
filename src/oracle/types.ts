@@ -82,6 +82,7 @@ export interface RunOracleOptions {
   system?: string;
   silent?: boolean;
   search?: boolean;
+  deepResearch?: boolean;
   preview?: boolean | string;
   previewMode?: PreviewMode;
   apiKey?: string;
@@ -133,6 +134,7 @@ export interface BuildRequestBodyParams {
   systemPrompt: string;
   userPrompt: string;
   searchEnabled: boolean;
+  deepResearchEnabled: boolean;
   maxOutputTokens?: number;
   background?: boolean;
   storeResponse?: boolean;

@@ -96,6 +96,7 @@ export async function runOracle(options: RunOracleOptions, deps: RunOracleDeps =
   const inputTokenBudget = options.maxInput ?? modelConfig.inputLimit;
   const files = await readFiles(options.file ?? [], { cwd, fsModule });
   const searchEnabled = options.search !== false;
+  const deepResearchEnabled = options.deepResearch === true;
   logVerbose(`cwd: ${cwd}`);
   if (files.length > 0) {
     const displayPaths = files
@@ -158,6 +159,7 @@ export async function runOracle(options: RunOracleOptions, deps: RunOracleDeps =
     systemPrompt,
     userPrompt: promptWithFiles,
     searchEnabled,
+    deepResearchEnabled,
     maxOutputTokens: options.maxOutput,
     background: useBackground,
     storeResponse: useBackground,
@@ -309,6 +311,9 @@ export async function runOracle(options: RunOracleOptions, deps: RunOracleDeps =
   statsParts.push(`tok(i/o/r/t)=${tokensDisplay}`);
   if (!searchEnabled) {
     statsParts.push('search=off');
+  }
+  if (deepResearchEnabled) {
+    statsParts.push('deep-research=on');
   }
   if (files.length > 0) {
     statsParts.push(`files=${files.length}`);

@@ -24,13 +24,19 @@ export function buildRequestBody({
   systemPrompt,
   userPrompt,
   searchEnabled,
+  deepResearchEnabled,
   maxOutputTokens,
   background,
   storeResponse,
 }: BuildRequestBodyParams): OracleRequestBody {
+  // Modify system prompt if deep research is enabled
+  const finalSystemPrompt = deepResearchEnabled
+    ? `${systemPrompt}\n\nENABLE DEEP RESEARCH MODE: Perform comprehensive research using advanced search capabilities. Explore multiple sources, synthesize information thoroughly, and provide detailed analysis with citations.`
+    : systemPrompt;
+
   return {
     model: modelConfig.model,
-    instructions: systemPrompt,
+    instructions: finalSystemPrompt,
     input: [
       {
         role: 'user',

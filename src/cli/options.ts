@@ -81,6 +81,17 @@ export function parseSearchOption(value: string): boolean {
   throw new InvalidArgumentError('Search mode must be "on" or "off".');
 }
 
+export function parseDeepResearchOption(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  if (['on', 'true', '1', 'yes'].includes(normalized)) {
+    return true;
+  }
+  if (['off', 'false', '0', 'no'].includes(normalized)) {
+    return false;
+  }
+  throw new InvalidArgumentError('Deep research mode must be "on" or "off".');
+}
+
 export function normalizeModelOption(value: string | undefined): string {
   return (value ?? '').trim();
 }
