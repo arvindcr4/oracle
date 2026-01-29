@@ -9,7 +9,6 @@ import {
 } from '../constants.js';
 import { delay } from '../utils.js';
 import { logDomFailure, logConversationSnapshot, buildConversationDebugExpression } from '../domDebug.js';
-import { buildClickDispatcher } from './domEvents.js';
 
 const ASSISTANT_POLL_TIMEOUT_ERROR = 'assistant-response-watchdog-timeout';
 
@@ -554,7 +553,6 @@ function buildResponseObserverExpression(timeoutMs: number, minTurnIndex?: numbe
     const captureViaObserver = () =>
       new Promise((resolve, reject) => {
         const deadline = Date.now() + ${timeoutMs};
-        let stopInterval = null;
         const observer = new MutationObserver(() => {
           const extractedRaw = extractFromTurns();
           const extractedCandidate =
@@ -568,35 +566,14 @@ function buildResponseObserverExpression(timeoutMs: number, minTurnIndex?: numbe
           }
           if (extracted) {
             observer.disconnect();
-            if (stopInterval) {
-              clearInterval(stopInterval);
-            }
             resolve(extracted);
           } else if (Date.now() > deadline) {
             observer.disconnect();
-            if (stopInterval) {
-              clearInterval(stopInterval);
-            }
             reject(new Error('Response timeout'));
           }
         });
         observer.observe(document.body, { childList: true, subtree: true, characterData: true });
-        stopInterval = setInterval(() => {
-          const stop = document.querySelector(STOP_SELECTOR);
-          if (!stop) {
-            return;
-          }
-          const isStopButton =
-            stop.getAttribute('data-testid') === 'stop-button' || stop.getAttribute('aria-label')?.toLowerCase()?.includes('stop');
-          if (isStopButton) {
-            return;
-          }
-          dispatchClickSequence(stop);
-        }, 500);
         setTimeout(() => {
-          if (stopInterval) {
-            clearInterval(stopInterval);
-          }
           observer.disconnect();
           reject(new Error('Response timeout'));
         }, ${timeoutMs});
