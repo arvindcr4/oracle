@@ -210,23 +210,7 @@ async function recoverAssistantResponse(
   logger: BrowserLogger,
   minTurnIndex?: number,
 ): Promise<{ text: string; html?: string; meta: { turnId?: string | null; messageId?: string | null } } | null> {
-  const recoveryTimeoutMs = Math.max(0, timeoutMs);
-  if (recoveryTimeoutMs === 0) {
-    return null;
-  }
-  const recovered = await waitForCondition(
-    async () => {
-      const snapshot = await readAssistantSnapshot(Runtime, minTurnIndex);
-      return normalizeAssistantSnapshot(snapshot);
-    },
-    recoveryTimeoutMs,
-    400,
-  );
-  if (recovered) {
-    logger('Recovered assistant response via polling fallback');
-    return recovered;
-  }
-  await logConversationSnapshot(Runtime, logger).catch(() => undefined);
+  // DISABLED: No polling fallback - let GPT think as long as needed
   return null;
 }
 
