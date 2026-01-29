@@ -505,7 +505,7 @@ function buildResponseObserverExpression(timeoutMs: number, minTurnIndex?: numbe
       ? Math.floor(minTurnIndex)
       : -1;
   return `(() => {
-    ${buildClickDispatcher()}
+    function dispatchClickSequence(target) { return false; /* DISABLED */ }
     const SELECTORS = ${selectorsLiteral};
     const STOP_SELECTOR = '${STOP_BUTTON_SELECTOR}';
     const FINISHED_SELECTOR = '${FINISHED_ACTIONS_SELECTOR}';
@@ -663,7 +663,7 @@ function buildAssistantExtractor(functionName: string): string {
   const conversationLiteral = JSON.stringify(CONVERSATION_TURN_SELECTOR);
   const assistantLiteral = JSON.stringify(ASSISTANT_ROLE_SELECTOR);
   return `const ${functionName} = () => {
-    ${buildClickDispatcher()}
+    function dispatchClickSequence(target) { return false; /* DISABLED */ }
     const CONVERSATION_SELECTOR = ${conversationLiteral};
     const ASSISTANT_SELECTOR = ${assistantLiteral};
     const isAssistantTurn = (node) => {
@@ -870,7 +870,7 @@ function buildMarkdownFallbackExtractor(minTurnLiteral?: string): string {
 
 function buildCopyExpression(meta: { messageId?: string | null; turnId?: string | null }): string {
   return `(() => {
-    ${buildClickDispatcher()}
+    function dispatchClickSequence(target) { return false; /* DISABLED */ }
     const BUTTON_SELECTOR = '${COPY_BUTTON_SELECTOR}';
     const TIMEOUT_MS = 10000;
 
